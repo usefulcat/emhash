@@ -345,9 +345,15 @@ public:
         rehash(bucket);
     }
 
-    HashMap(size_type bucket = 2, float mlf = EMH_DEFAULT_LOAD_FACTOR) noexcept
+    HashMap()
     {
-        init(bucket, mlf);
+        init(2);
+    }
+
+    HashMap(size_type bucket_count, const HashT& hash = HashT(), const key_equal& equal = key_equal()) :
+        _hasher(hash), _eq(equal)
+    {
+        init(bucket_count);
     }
 
     HashMap(const HashMap& rhs) noexcept
@@ -1461,6 +1467,11 @@ public:
 #endif
         free(old_pairs);
         assert(old_num_filled == _num_filled);
+    }
+
+    // This exists to match the API of std::unordered_map
+    size_type bucket(const KeyT& key) const {
+        return key_to_bucket(key);
     }
 
 private:
