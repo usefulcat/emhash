@@ -585,8 +585,9 @@ public:
     inline float max_load_factor() const noexcept { return (1 << 27) / (float)_mlf; }
     void max_load_factor(float ml) noexcept
     {
-        if (ml < 0.991f && ml > EMH_MIN_LOAD_FACTOR)
-            _mlf = (uint32_t)((1 << 27) / ml);
+        ml = std::min(ml, 0.991f);
+        ml = std::max(ml, EMH_MIN_LOAD_FACTOR);
+        _mlf = (uint32_t)((1 << 27) / ml);
     }
 
     inline constexpr size_type max_size() const { return 1ull << (sizeof(size_type) * 8 - 1); }
