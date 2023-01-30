@@ -543,7 +543,7 @@ public:
 
     size_t AllocSize(uint64_t num_buckets) const
     {
-        return (num_buckets + EPACK_SIZE) * sizeof(PairT) + (num_buckets + 7) / 8 + BIT_PACK;
+        return round_out((num_buckets + EPACK_SIZE) * sizeof(PairT) + (num_buckets + 7) / 8 + BIT_PACK, EMH_MALIGN);
     }
 
     HashMap(const HashMap& rhs) noexcept
@@ -1849,6 +1849,16 @@ private:
     inline size_type hash_key(const UType& key) const
     {
         return (size_type)_hasher(key);
+    }
+
+    static size_t round_in(size_t i, size_t alignment)
+    {
+        return (i / alignment) * alignment;
+    }
+
+    static size_t round_out(size_t i, size_t alignment)
+    {
+        return round_in(i + alignment - 1, alignment);
     }
 
 private:

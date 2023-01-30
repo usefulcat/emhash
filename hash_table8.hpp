@@ -1066,13 +1066,13 @@ public:
 
     static value_type* alloc_bucket(size_type num_buckets)
     {
-        auto new_pairs = (char*)aligned_alloc(32, (uint64_t)num_buckets * sizeof(value_type));
+        auto new_pairs = (char*)aligned_alloc(32, round_out((uint64_t)num_buckets * sizeof(value_type), 32));
         return (value_type *)(new_pairs);
     }
 
     static Index* alloc_index(size_type num_buckets)
     {
-        auto new_index = (char*)aligned_alloc(16, (uint64_t)(EAD + num_buckets) * sizeof(Index));
+        auto new_index = (char*)aligned_alloc(16, round_out((uint64_t)(EAD + num_buckets) * sizeof(Index), 16));
         return (Index *)(new_index);
     }
 
@@ -1767,6 +1767,16 @@ private:
     inline uint64_t hash_key(const UType& key) const
     {
         return _hasher(key);
+    }
+
+    static size_t round_in(size_t i, size_t alignment)
+    {
+        return (i / alignment) * alignment;
+    }
+
+    static size_t round_out(size_t i, size_t alignment)
+    {
+        return round_in(i + alignment - 1, alignment);
     }
 
 private:
