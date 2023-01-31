@@ -219,6 +219,7 @@ public:
     typedef HashMap<KeyT, ValueT, HashT, EqT> htype;
     typedef std::pair<KeyT, ValueT>           value_type;
 
+    typedef ::emhash5::size_type              size_type;
 #if EMH_BUCKET_INDEX == 0
     typedef value_type                        value_pair;
     typedef std::pair<size_type, value_type>  PairT;
