@@ -600,9 +600,9 @@ public:
     float max_load_factor() const noexcept { return (1 << 27) / (float)_mlf; }
     void max_load_factor(float mlf) noexcept
     {
-        mlf = std::min(ml, 0.999f);
-        mlf = std::max(ml, EMH_MIN_LOAD_FACTOR);
-        _mlf = (uint32_t)((1 << 27) / ml);
+        mlf = std::min(mlf, 0.999f);
+        mlf = std::max(mlf, EMH_MIN_LOAD_FACTOR);
+        _mlf = (uint32_t)((1 << 27) / mlf);
     }
 
     constexpr size_type max_size() const { return 1ull << (sizeof(size_type) * 8 - 1); }
