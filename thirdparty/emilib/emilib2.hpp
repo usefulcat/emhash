@@ -130,8 +130,12 @@ public:
     typedef KeyT   key_type;
 
 #ifdef EMH_H2
-    #define hash_key2(key_hash, key) ((uint8_t)(key_hash >> 24)) << 1
-    //#define hash_key2(key_hash, key) (((uint8_t)(key_hash >> 57)) << 1)
+    template<typename UType>
+    inline uint8_t hash_key2(uint64_t key_hash, const UType& key) const
+    {
+        (void)key_hash;
+        return (uint8_t)((uint8_t)(key_hash >> 24)) << 1;
+    }
 #else
     template<typename UType, typename std::enable_if<!std::is_integral<UType>::value, uint8_t>::type = 0>
     inline uint8_t hash_key2(uint64_t key_hash, const UType& key) const
@@ -209,7 +213,7 @@ public:
         void goto_next_element()
         {
             _bmask &= _bmask - 1;
-            if (EMH_LIKELY(_bmask != 0)) {
+            if (_bmask != 0) {
                 _bucket = _from + CTZ(_bmask);
                 return;
             }
@@ -287,7 +291,7 @@ public:
         void goto_next_element()
         {
             _bmask &= _bmask - 1;
-            if (EMH_LIKELY(_bmask != 0)) {
+            if (_bmask != 0) {
                 _bucket = _from + CTZ(_bmask);
                 return;
             }
@@ -372,15 +376,18 @@ public:
             clear();
             return;
         }
+        if (is_triviall_destructable()) {
+            clear();
+        }
 
-        _hasher     = other._hasher;
-        if (is_copy_trivially()) {
+        if (other._num_buckets != _num_buckets) {
             _num_filled = _num_buckets = 0;
             reserve(other._num_buckets / 2);
+        }
+
+        if (is_copy_trivially()) {
             memcpy(_pairs, other._pairs, _num_buckets * sizeof(_pairs[0]));
         } else {
-            clear();
-            reserve(other._num_buckets / 2);
             for (auto it = other.cbegin(); it.bucket() != _num_buckets; ++it)
                 new(_pairs + it.bucket()) PairT(*it);
         }
@@ -461,32 +468,33 @@ public:
         return _num_filled / static_cast<float>(_num_buckets);
     }
 
-    void max_load_factor(float lf = 8.0f/9)
+    float max_load_factor(float lf = 8.0f/9)
     {
+        return 7/8.0f;
     }
 
     // ------------------------------------------------------------
 
     template<typename K>
-    inline iterator find(const K& key) noexcept
+    iterator find(const K& key) noexcept
     {
         return {this, find_filled_bucket(key), false};
     }
 
     template<typename K>
-    inline const_iterator find(const K& key) const noexcept
+    const_iterator find(const K& key) const noexcept
     {
         return {this, find_filled_bucket(key), false};
     }
 
     template<typename K>
-    inline bool contains(const K& k) const noexcept
+    bool contains(const K& k) const noexcept
     {
         return find_filled_bucket(k) != _num_buckets;
     }
 
     template<typename K>
-    inline size_t count(const K& k) const noexcept
+    size_t count(const K& k) const noexcept
     {
         return find_filled_bucket(k) != _num_buckets;
     }
@@ -609,7 +617,7 @@ public:
         const auto key_hash = _hasher(key);
         const auto bucket = find_empty_slot(key_hash & _mask, 0);
 
-        _states[bucket] = hash_key2(key_hash, key);
+        set_states(bucket, hash_key2(key_hash, key));
         new(_pairs + bucket) PairT(std::forward<K>(key), std::forward<V>(val)); _num_filled++;
         return bucket;
     }
@@ -633,6 +641,20 @@ public:
         }
 
         return { {this, bucket, false}, bempty };
+    }
+
+    bool set_get(const KeyT& key, const ValueT& val, ValueT& oldv)
+    {
+        check_expand_need();
+
+        bool bempty = true;
+        const auto bucket = find_or_allocate(key, bempty);
+        /* Check if inserting a new value rather than overwriting an old entry */
+        if (bempty) {
+            new(_pairs + bucket) PairT(key,val); _num_filled++;
+        } else
+            oldv = _pairs[bucket].second;
+        return bempty;
     }
 
     ValueT& operator[](const KeyT& key) noexcept
@@ -830,11 +852,12 @@ public:
             if (old_states[src_bucket] % 2 == State::EFILLED) {
                 auto& src_pair = old_pairs[src_bucket];
                 const auto key_hash = _hasher(src_pair.first);
-                const auto dst_bucket = find_empty_slot(key_hash & _mask, 0);
+                const auto main_bucket = key_hash & _mask;
+                const auto dst_bucket = find_empty_slot(main_bucket, 0);
 
-                _states[dst_bucket] = hash_key2(key_hash, src_pair.first);
+                set_states(dst_bucket, hash_key2(key_hash, src_pair.first));
                 new(_pairs + dst_bucket) PairT(std::move(src_pair));
-                _num_filled += 1;
+                _num_filled ++;
                 src_pair.~PairT();
             }
         }
@@ -853,9 +876,14 @@ private:
     {
         // Prefetch the heap-allocated memory region to resolve potential TLB
         // misses.  This is intended to overlap with execution of calculating the hash for a key.
-#if defined(__GNUC__) || EMH_PREFETCH
+#if EMH_PREFETCH
         __builtin_prefetch(static_cast<const void*>(ctrl), 0, 1);
 #endif
+    }
+
+    inline void set_states(size_t ebucket, uint8_t key_h2)
+    {
+        _states[ebucket] = key_h2;
     }
 
     // Find the bucket with this key, or return (size_t)-1
@@ -865,13 +893,13 @@ private:
         const auto key_hash = _hasher(key);
         auto next_bucket = (size_t)(key_hash & _mask);
 
-        //prefetch_heap_block((char*)_states + next_bucket);
+        prefetch_heap_block((char*)_states + next_bucket);
 
         const auto filled = SET1_EPI8(hash_key2(key_hash, key));
         int i = _max_probe_length;
 
         while (true) {
-            const auto vec = LOADU_EPI8((decltype(&simd_empty))((char*)_states + next_bucket));
+            const auto vec = LOADU_EPI8((decltype(&simd_empty))(&_states[next_bucket]));
             auto maskf = MOVEMASK_EPI8(CMPEQ_EPI8(vec, filled));
 
             while (maskf != 0) {
@@ -882,7 +910,7 @@ private:
             }
 
             const auto maske = MOVEMASK_EPI8(CMPEQ_EPI8(vec, simd_empty));
-            if (EMH_LIKELY(maske != 0))
+            if (maske != 0)
                 break;
 
             next_bucket += simd_bytes;
@@ -908,7 +936,7 @@ private:
         const auto key_hash = _hasher(key);
         const auto key_h2 = hash_key2(key_hash, key);
         const auto bucket = (size_t)(key_hash & _mask);
-        //prefetch_heap_block((char*)_states + bucket);
+        prefetch_heap_block((char*)_states + bucket);
 
         const auto filled = SET1_EPI8(key_h2);
         const auto round  = bucket + _max_probe_length;
@@ -1019,6 +1047,16 @@ private:
             next_bucket += simd_bytes;
         }
         return 0;
+    }
+
+    inline size_t H1(const KeyT& key) const noexcept
+    {
+#ifdef EMH_H3
+        const auto key_hash = _hasher(key);
+        return (key_hash >> 7) ^ (reinterpret_cast<uintptr_t>(_states) >> 12);
+#else
+        return (size_t)_hasher(key);
+#endif
     }
 
 private:

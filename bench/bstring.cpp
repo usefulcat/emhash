@@ -5,8 +5,6 @@
 #define _SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING
 
 #include <boost/unordered/unordered_flat_map.hpp>
-#include <boost/core/detail/splitmix64.hpp>
-#include <boost/config.hpp>
 #ifdef ABSL_HMAP
 # include "absl/container/node_hash_map.h"
 # include "absl/container/flat_hash_map.h"
@@ -19,15 +17,16 @@
 #endif
 
 #include "./util.h"
-#include "martinus/robin_hood.h"
-#include "martinus/unordered_dense.h"
+#include "martin/robin_hood.h"
+#include "martin/unordered_dense.h"
 
 #include "../hash_table8.hpp"
 #include "../hash_table7.hpp"
 #include "../hash_table5.hpp"
 
-#include "emilib/emilib3so.hpp"
+#include "emilib/emilib2ss.hpp"
 #include "emilib/emilib2o.hpp"
+#include "emilib/emilib2s.hpp"
 
 #include <unordered_map>
 #include <vector>
@@ -43,13 +42,14 @@ static void print_time( std::chrono::steady_clock::time_point & t1, char const* 
 {
     auto t2 = std::chrono::steady_clock::now();
 
-    std::cout << label << ": " << ( t2 - t1 ) / 1ms << " ms (s=" << s << ", size=" << size << ")\n";
+    std::cout << "\t" << label << ": " << ( t2 - t1 ) / 1ms << " ms";// (size=" << size << ")";
+    if (s == 123) std::cout << " err:";
 
     t1 = t2;
 }
 
-constexpr unsigned N = 2'000'000;
-constexpr int K = 10;
+static unsigned N = 2'000'000;
+static int K = 10;
 
 static std::vector<std::string> indices1, indices2;
 
@@ -83,7 +83,8 @@ static void init_indices()
     indices2.push_back( make_index( 0 ) );
 
     {
-        boost::detail::splitmix64 rng;
+        //boost::detail::splitmix64 rng;
+        WyRand rng;
 
         for( unsigned i = 1; i <= N*2; ++i )
         {
@@ -103,26 +104,25 @@ template<class Map> BOOST_NOINLINE void test_insert( Map& map, std::chrono::stea
 
     for( unsigned i = 1; i <= N; ++i )
     {
-        map.insert( { indices2[ i ], i } );
+        map.emplace(  indices2[ i ], i  );
     }
 
     print_time( t1, "Random insert",  0, map.size() );
 
-    std::cout << std::endl;
+//    std::cout << std::endl;
 }
 
 template<class Map> BOOST_NOINLINE void test_lookup( Map& map, std::chrono::steady_clock::time_point & t1 )
 {
     std::uint32_t s;
-    
+
     s = 0;
 
     for( int j = 0; j < K; ++j )
     {
         for( unsigned i = 1; i <= N * 2; ++i )
         {
-            auto it = map.find( indices1[ i ] );
-            if( it != map.end() ) s += it->second;
+            s += map.count( indices1[ i ] );
         }
     }
 
@@ -141,7 +141,7 @@ template<class Map> BOOST_NOINLINE void test_lookup( Map& map, std::chrono::stea
 
     print_time( t1, "Random lookup",  s, map.size() );
 
-    std::cout << std::endl;
+//    std::cout << std::endl;
 }
 
 template<class Map> BOOST_NOINLINE void test_iteration( Map& map, std::chrono::steady_clock::time_point & t1 )
@@ -245,7 +245,7 @@ struct record
 
 static std::vector<record> times;
 
-#if STD_VIEW && CXX17
+#if STD_VIEW || 1
 #include <string_view>
 using keyType = std::string_view;
 #else
@@ -254,8 +254,6 @@ using keyType = std::string;
 
 template<template<class...> class Map> BOOST_NOINLINE void test( char const* label )
 {
-    std::cout << label << ":\n\n";
-
     s_alloc_bytes = 0;
     s_alloc_count = 0;
 
@@ -266,7 +264,8 @@ template<template<class...> class Map> BOOST_NOINLINE void test( char const* lab
 
     test_insert( map, t1 );
 
-    std::cout << "Memory: " << s_alloc_bytes << " bytes in " << s_alloc_count << " allocations\n\n";
+    if (s_alloc_bytes > 0)
+    std::cout << "Memory: " << s_alloc_bytes << " bytes in " << s_alloc_count << " allocations\n";
 
     record rec = { label, 0, s_alloc_bytes, s_alloc_count };
 
@@ -276,22 +275,22 @@ template<template<class...> class Map> BOOST_NOINLINE void test( char const* lab
     test_erase( map, t1 );
 
     auto tN = std::chrono::steady_clock::now();
-    std::cout << "Total: " << ( tN - t0 ) / 1ms << " ms\n\n";
-
     rec.time_ = ( tN - t0 ) / 1ms;
     times.push_back( rec );
+    std::cout << (tN - t0) / 1ms << " ms ";
+    std::cout << label << ":\n\n";
 }
 
-#if ABSL_HASH
-    #define BstrHasher absl::Hash<K>
-#elif BOOST_HASH
+#if BOOST_HASH
     #define BstrHasher boost::hash<K>
-#elif ROBIN_HASH
+#elif HOOD_HASH
     #define BstrHasher robin_hood::hash<K>
-#elif CXX17
-    #define BstrHasher ankerl::unordered_dense::hash<K>
-#else
+#elif STD_HASH
     #define BstrHasher std::hash<K>
+#elif ABSL_HASH
+    #define BstrHasher absl::Hash<K>
+#else
+    #define BstrHasher ankerl::unordered_dense::hash<K>
 #endif
 
 // aliases using the counting allocator
@@ -302,14 +301,15 @@ template<class K, class V> using std_unordered_map =
     std::unordered_map<K, V, BstrHasher, std::equal_to<K>, allocator_for<K, V>>;
 
 template<class K, class V> using boost_unordered_flat_map =
-    boost::unordered_flat_map<K, V, BstrHasher, std::equal_to<K>, allocator_for<K, V>>;
+    boost::unordered_flat_map<K, V, BstrHasher, std::equal_to<K>>;
 
 template<class K, class V> using emhash_map8 = emhash8::HashMap<K, V, BstrHasher, std::equal_to<K>>;
 template<class K, class V> using emhash_map7 = emhash7::HashMap<K, V, BstrHasher, std::equal_to<K>>;
 template<class K, class V> using emhash_map5 = emhash5::HashMap<K, V, BstrHasher, std::equal_to<K>>;
 
-template<class K, class V> using martinus_flat = robin_hood::unordered_map<K, V, BstrHasher, std::equal_to<K>>;
-template<class K, class V> using martinus_dense = ankerl::unordered_dense::map<K, V, BstrHasher, std::equal_to<K>>;
+template<class K, class V> using martin_flat = robin_hood::unordered_map<K, V, BstrHasher, std::equal_to<K>>;
+template<class K, class V> using martin_dense = ankerl::unordered_dense::map<K, V, BstrHasher, std::equal_to<K>>;
+template<class K, class V> using emilib1_map = emilib::HashMap<K, V, BstrHasher, std::equal_to<K>>;
 template<class K, class V> using emilib2_map = emilib2::HashMap<K, V, BstrHasher, std::equal_to<K>>;
 template<class K, class V> using emilib3_map = emilib::HashMap<K, V, BstrHasher, std::equal_to<K>>;
 
@@ -391,7 +391,7 @@ template<class K, class V> using std_unordered_map_fnv1a =
 std::unordered_map<K, V, fnv1a_hash, std::equal_to<K>, allocator_for<K, V>>;
 
 template<class K, class V> using boost_unordered_flat_map_fnv1a =
-    boost::unordered_flat_map<K, V, fnv1a_hash, std::equal_to<K>, allocator_for<K, V>>;
+    boost::unordered_flat_map<K, V, fnv1a_hash, std::equal_to<K>>;
 
 #ifdef ABSL_HMAP
 
@@ -399,7 +399,7 @@ template<class K, class V> using absl_node_hash_map_fnv1a =
     absl::node_hash_map<K, V, fnv1a_hash, absl::container_internal::hash_default_eq<K>, allocator_for<K, V>>;
 
 template<class K, class V> using absl_flat_hash_map_fnv1a =
-    absl::flat_hash_map<K, V, fnv1a_hash, absl::container_internal::hash_default_eq<K>, allocator_for<K, V>>;
+    absl::flat_hash_map<K, V, fnv1a_hash, absl::container_internal::hash_default_eq<K>>;
 
 #endif
 
@@ -425,21 +425,28 @@ template<class K, class V> using tsl_robin_pg_map_fnv1a =
 
 //
 
-int main()
+int main(int argc, const char* argv[])
 {
+    if (argc > 1 && isdigit(argv[1][0]))
+        N = atoi(argv[1]);
+    if (argc > 2 && isdigit(argv[2][0]))
+        K = atoi(argv[2]);
+
     init_indices();
 
-//    test<std_unordered_map>( "std::unordered_map" );
-    test<emhash_map5>( "emhash5::hash_map" );
-    test<boost_unordered_flat_map>( "boost::unordered_flat_map" );
+    printf("N = %d, Loops = %d\n", N, K);
 
+    test<emilib1_map> ("emilib1_map" );
+    test<emilib3_map> ("emilib3_map" );
+    test<boost_unordered_flat_map>( "boost::unordered_flat_map" );
+    test<emilib2_map> ("emilib2_map" );
+
+    test<emhash_map5>( "emhash5::hash_map" );
     test<emhash_map7>( "emhash7::hash_map" );
     test<emhash_map8>( "emhash8::hash_map" );
-    test<martinus_dense>("martinus::dense_hash_map" );
-    test<martinus_flat>("martinus::flat_hash_map" );
+    test<martin_dense>("martin::dense_hash_map" );
+    test<martin_flat>("martin::flat_hash_map" );
 
-    test<emilib2_map> ("emilib2_map" );
-    test<emilib3_map> ("emilib3_map" );
 
 #ifdef ABSL_HMAP
 
@@ -482,6 +489,8 @@ int main()
     test<tsl_robin_pg_map_fnv1a>( "tsl::robin_pg_map, FNV-1a" );
 
 #endif
+
+    test<std_unordered_map>( "std::unordered_map" );
 
     std::cout << "---\n\n";
 

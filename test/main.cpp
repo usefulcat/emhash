@@ -4,20 +4,33 @@
 //#include "utils.h"
 #endif
 
+//#define TKey 2
+//#define EMH_SAFE_PSL 1
+//#define EMH_STATIS   1234567
+//#define EMH_PSL_LINEAR 1
+
+//#define EMH_PSL      32
+//#define EMH_QUADRATIC 1
 
 //#define EMH_IDENTITY_HASH 1
 #include "eutil.h"
 //#define EMH_WYHASH_HASH 1
 //#define EMH_ITER_SAFE 1
+//#define EMH_FIND_HIT  1
+//#define EMH_BUCKET_INDEX 2
+
 #include "../hash_table5.hpp"
 #include "../hash_table6.hpp"
 #include "../hash_table7.hpp"
 #include "../hash_table8.hpp"
-#include "emilib/emilib2.hpp"
+
+#include "emilib/emilib2o.hpp"
+#include "emilib/emilib2s.hpp"
+#include "emilib/emilib2ss.hpp"
 
 
-#include "martinus/robin_hood.h"
-#include "martinus/unordered_dense.h"
+//#include "martin/robin_hood.h"
+#include "martin/unordered_dense.h"
 #include "phmap/phmap.h"
 
 #if CXX20
@@ -50,6 +63,9 @@ struct string_equal
     }
 
     bool operator()(const char* lhs, const std::string& rhs) const {
+        return std::strcmp(lhs, rhs.data()) == 0;
+    }
+    bool operator()(const std::string& rhs, const char* lhs) const {
         return std::strcmp(lhs, rhs.data()) == 0;
     }
 };
@@ -94,6 +110,7 @@ struct KeyEqual {
 };
 
 struct Foo {
+    Foo() = default;
     Foo(int val_) : val(val_) {}
     int val;
     bool operator==(const Foo &rhs) const { return val == rhs.val; }
@@ -126,7 +143,7 @@ inline Os& operator<<(Os& os, Container const& cont)
 #if 0
 #define ehmap  emilib2::HashMap
 #else
-#define ehmap  emhash7::HashMap
+#define ehmap  emhash8::HashMap
 #endif
 #define ehmap5 emhash5::HashMap
 #define ehmap6 emhash6::HashMap
@@ -153,6 +170,7 @@ static void TestApi()
 
         m2[2] = "frist";
         m2.find(2)->second = "second";
+        assert(m2.at(2) == "second");
         m2.insert({3, "null"}).first->second = "third";
         m2.emplace(4, "null").first->second = "four";
         m2.insert(std::pair<int, std::string>(5, "insert"));
@@ -177,6 +195,7 @@ static void TestApi()
 
         // move constructor
         auto m4 = std::move(m2);
+        assert(m2.empty());
 
         //copy constructor
         m2 = std::move(m4);
@@ -238,13 +257,15 @@ static void TestApi()
     //copy
     {
         ehmap<short, int> dict = {{1, 1}, {2, 2}, {3, 3}};
-        dict.reserve(1 << 20);// overview
+        dict.reserve(1u << 20);// overview
+#if EMH_SAVE_MEM
         assert(dict.bucket_count() <= (2 << 16));
+#endif
         dict.shrink_to_fit();
-        assert(dict.bucket_count() <= 8);
+        assert(dict.bucket_count() <= 32);
 
         dict.reserve(1024);
-        for (int i = 0; i < 1024; i++) {
+        for (short i = 0; i < 1024; i++) {
             dict[i] = 0;
             decltype(dict) dict2 = dict;
             assert(dict2 == dict);
@@ -252,7 +273,7 @@ static void TestApi()
         assert(dict.size() == 1024);
 
         for (int i = 0; i < 1024; i++) {
-            dict.erase(i);
+            dict.erase((short)i);
             decltype(dict) dict3 = {{1, 1}, {2, 2}, {3, 3}};
             dict3 = dict;
             assert(dict3 == dict);
@@ -288,10 +309,13 @@ static void TestApi()
         // uses pair's move constructor
         m.emplace(std::make_pair(std::string("a"), std::string("a")));
         // uses pair's converting move constructor
+        m.emplace(std::make_pair("b", "b"));
         m.emplace(std::make_pair("b", "abcd"));
-        m.emplace(std::move(std::make_pair("b", "abcd")));
         // uses pair's template constructor
         m.emplace("d", "ddd");
+        assert(m.size() == 3);
+        assert(m["d"] == "ddd");
+        assert(m["b"] == "b");
 
 #if 0
         // uses pair's piecewise constructor
@@ -363,8 +387,14 @@ static void TestApi()
         // erase all odd numbers from c
         for(auto it = c.begin(); it != c.end(); ) {
             printf("%d:%s\n", it->first,  it->second.data());
-            if(it->first % 2 != 0)
-                it = c.erase(it);
+            if(it->first % 2 != 0) {
+                if constexpr (std::is_void_v<decltype(c.erase(it))>) {
+                    c.erase(it++);
+                } else {
+//                    c.erase(it++);
+                    it = c.erase(it);
+                }
+            }
             else
                 ++it;
         }
@@ -456,7 +486,7 @@ static void TestApi()
         }
 
         //Repeat the above with the range-based for loop
-        for(auto i : mag) {
+        for(auto& i : mag) {
             auto cur = i.first;
             cur->y = i.second;
             mag[cur] = std::hypot(cur->x, cur->y);
@@ -493,7 +523,7 @@ static void TestApi()
         }
 
         //Repeat the above with the range-based for loop
-        for(auto i : mag) {
+        for(auto& i : mag) {
             auto cur = i.first;
             cur->y = i.second;
             mag[cur] = std::hypot(cur->x, cur->y);
@@ -575,9 +605,10 @@ static void TestApi()
       data.emplace_hint(data.end(), 1, 'd');
     }
 
+#if 1
     {
         ehmap<uint64_t, uint32_t> emi;
-        emi.reserve(1e8);
+        emi.reserve(1000);
         int key = rand();
         emi.insert({key, 0}); emi.emplace(key, 1);
         auto it = emi.try_emplace(key, 0); assert(!it.second);
@@ -589,9 +620,11 @@ static void TestApi()
         assert(iter->second == 0);
 #ifdef EMH_ITER_SAFE
         auto iter_next = iter; iter_next++;
+        iter_next++;
         assert(iter_next == emi.end());
 #endif
     }
+#endif
 
 #if CXX20
     {
@@ -611,6 +644,16 @@ static void TestApi()
 #endif
 }
 
+#if FIB_HASH
+    #define BintHasher Int64Hasher<keyType>
+#elif HOOD_HASH
+    #define BintHasher robin_hood::hash<keyType>
+#elif STD_HASH
+    #define BintHasher std::hash<keyType>
+#else
+    #define BintHasher ankerl::unordered_dense::hash<keyType>
+#endif
+
 #define TO_KEY(i)  i
 static int RandTest(size_t n, int max_loops = 1234567)
 {
@@ -618,103 +661,129 @@ static int RandTest(size_t n, int max_loops = 1234567)
     printf("============================== %s ============================\n", __FUNCTION__);
     using keyType = uint64_t;
 
-#if X860
-    emilib2::HashMap <keyType, int> shash;
+#if EMI == 0
+    emilib2::HashMap <keyType, int, BintHasher> ehash;
+#elif EMI == 3
+    emilib3::HashMap <keyType, int, BintHasher> ehash;
+#elif EMI == 1
+    emilib::HashMap <keyType, int, BintHasher> ehash;
 #else
-    ehmap7<keyType, int> shash;
+    ankerl::unordered_dense::map<keyType, int> ehash;
 #endif
 
-    ehmap5<keyType, int> ehash5;
+    ehmap8<keyType, int, BintHasher> ehash8;
 
-#if EMH6
-    ehmap6<keyType, int> unhash;
+#if EMH == 5
+    ehmap5<keyType, int, BintHasher> unhash;
+#elif EMH == 6
+    ehmap6<keyType, int, BintHasher> unhash;
 #else
-    ehmap8<keyType, int> unhash;
+    //emilib3::HashMap <keyType, int, BintHasher> ehash;
+    ehmap7<keyType, int, BintHasher> unhash;
 #endif
 
-    Sfc4 srng(n + time(0));
+    WyRand srng(time(0));
     const auto step = n % 2 + 1;
-    for (int i = 1; i < n * step; i += step) {
+    for (size_t i = 1; i < n * step; i += step) {
         auto ki = TO_KEY(i);
-        ehash5[ki] = unhash[ki] = shash[ki] = (int)srng();
+        ehash8[ki] = unhash[ki] = ehash[ki] = (int)srng();
     }
 
     {
-        assert(ehash5 == shash);
-        assert(ehash5 == unhash);
+        assert(ehash8 == ehash);
+        assert(ehash8 == unhash);
     }
 
+    auto nows = time(0);
     int loops = max_loops;
     while (loops -- > 0) {
-        assert(shash.size() == unhash.size()); assert(ehash5.size() == unhash.size());
+        assert(ehash.size() == unhash.size());
+        assert(ehash8.size() == unhash.size());
 
-        const uint32_t type = srng() % 100;
+        const uint32_t type = int(srng() % 100);
         auto rid  = srng();// n ++;
         auto id   = TO_KEY(rid);
-        if (type <= 40 || shash.size() < 1000) {
-            shash[id] += type; ehash5[id] += type; unhash[id] += type;
+        if (type <= 40 || ehash8.size() < 1000) {
+          auto cnid = ehash8.count(id);
+          assert(cnid == unhash.count(id));
 
-            assert(shash[id] == unhash[id]); assert(ehash5[id] == unhash[id]);
+            if (type % 3 == 0) {
+                ehash[id] += type; ehash8[id] += type; unhash[id] += type;
+            } else if (type % 2 == 0) {
+                ehash.insert_or_assign(id, type + 2);
+                ehash8.insert_or_assign(id, type + 2);
+                unhash.insert_or_assign(id, type + 2);
+            } else {
+                ehash.emplace(id, type + 1);
+                ehash8.emplace(id, type + 1);
+                unhash.emplace(id, type + 1);
+            }
+
+            assert(ehash8[id] == ehash[id]);
+            if (ehash[id] != unhash[id]) {
+                cnid = unhash.count(id);
+                unhash.emplace(id, type + 1);
+                printf("%d e=%d %d %d %d\n", type, cnid, ehash[id], ehash8[id], unhash.at(id));
+            }
         }
         else if (type < 60) {
             if (srng() % 3 == 0)
                 id = unhash.begin()->first;
             else if (srng() % 2 == 0)
-                id = shash.begin()->first;
+                id = ehash.begin()->first;
             else
-                id = ehash5.begin()->first;
+                id = ehash8.last()->first;
 
-            ehash5.erase(id);
+            ehash8.erase(id);
+            ehash.erase(id);
             unhash.erase(unhash.find(id));
-            shash.erase(id);
 
-            assert(ehash5.count(id) == unhash.count(id));
-            assert(shash.count(id) == unhash.count(id));
+            assert(ehash.count(id) == unhash.count(id));
+            assert(ehash8.count(id) == unhash.count(id));
         }
         else if (type < 80) {
-            auto it = ehash5.begin();
+            auto it = ehash8.begin();
             for (int i = n % 64; i > 0; i--)
                 it ++;
             id = it->first;
             unhash.erase(id);
-            shash.erase(shash.find(id));
-            ehash5.erase(it);
-            assert(shash.count(id) == 0);
-            assert(ehash5.count(id) == unhash.count(id));
+            ehash.erase(ehash.find(id));
+            ehash8.erase(it);
+            assert(ehash.count(id) == 0);
+            assert(ehash8.count(id) == unhash.count(id));
         }
         else if (type < 100) {
-            if (unhash.count(id) == 0) {
+            if (ehash8.count(id) == 0) {
                 const auto vid = (int)rid;
-                ehash5.emplace(id, vid);
-                assert(ehash5.count(id) == 1);
+                ehash8.emplace(id, vid);
+                assert(ehash8.count(id) == 1);
 
-                assert(shash.count(id) == 0);
+                assert(ehash.count(id) == 0);
                 //if (id == 1043)
-                shash[id] = vid;
-                assert(shash.count(id) == 1);
+                ehash[id] = vid;
+                assert(ehash.count(id) == 1);
 
                 assert(unhash.count(id) == 0);
-                unhash[id] = shash[id];
-                assert(unhash[id] == shash[id]);
-                assert(unhash[id] == ehash5[id]);
-            } else {
-                unhash[id] = shash[id] = 1;
-                ehash5.insert_or_assign(id, 1);
+                unhash[id] = ehash[id];
+                assert(ehash8[id] == ehash[id]);
+                assert(unhash[id] == ehash8[id]);
+            }
+            else {
+                unhash[id] = ehash[id] = 1;
+                ehash8.insert_or_assign(id, 1);
                 unhash.erase(id);
-                shash.erase(id);
-                ehash5.erase(id);
+                ehash.erase(id);
+                ehash8.erase(id);
             }
         }
-        if (loops % 100000 == 0) {
-            printf("%d %d\r", loops, (int)shash.size());
-#if 1
-            assert(ehash5 == shash);
-            assert(ehash5 == unhash);
-#endif
+        if (loops % 1000'000 == 0) {
+            printf("loops = %d %d\n", loops, (int)ehash.size());
+            assert(ehash8.operator==(ehash));
+            assert(ehash8 == unhash);
         }
     }
 
-    printf("\n");
+    printf("time use %d sec\n", int(time(0) - nows));
     return 0;
 }
 
@@ -791,103 +860,161 @@ static void benchStringHash(int size, int str_min, int str_max)
     printf("\n%s loops = %d\n", __FUNCTION__, size);
     std::vector<std::string> rndstring;
     rndstring.reserve(size * 4);
+    const uint64_t rseed = rand();
 
     long sum = 0;
     for (int i = 1; i <= 6; i++)
     {
         rndstring.clear();
-		printf("%d - %d bytes\n", str_min * i, str_max * i);
+        printf("%d - %d bytes\n", str_min * i, str_max * i);
         buildRandString(size * i, rndstring, str_min * i, str_max * i);
 
         int64_t start = 0;
-        int t_find = 0;
+        int64_t t_find = 0;
 
         start = getus();
-        for (auto& v : rndstring)
-            sum += std::hash<std::string>()(v);
+        for (const auto& v : rndstring)
+            sum = std::hash<std::string>()(v);
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("std hash    = %4d ms\n", t_find);
+        printf("std hash    = %4d ms\n", (int)t_find);
 
 #ifdef WYHASH_LITTLE_ENDIAN
         start = getus();
-        for (auto& v : rndstring)
-            sum += wyhash(v.data(), v.size(), 1);
+        for (const auto& v : rndstring)
+            sum += wyhash(v.data(), v.size(), rseed);
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("wyhash      = %4d ms\n", t_find);
+        printf("wyhash      = %4d ms\n", (int)t_find);
 #endif
 
 #if KOMI_HESH
         start = getus();
-        for (auto& v : rndstring)
-            sum += komihash(v.data(), v.size(), 1);
+        for (const auto& v : rndstring)
+            sum += komihash(v.data(), v.size(), rseed);
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("komi_hash   = %4d ms\n", t_find);
+        printf("komi_hash   = %4d ms\n", (int)t_find);
 #endif
 
 #ifdef AHASH_AHASH_H
         start = getus();
-        for (auto& v : rndstring)
-            sum += ahash64(v.data(), v.size(), 1);
+        for (const auto& v : rndstring)
+            sum += ahash64(v.data(), v.size(), rseed);
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("ahash       = %4d ms\n", t_find);
-#endif
+        printf("ahash       = %4d ms\n", (int)t_find);
 
         start = getus();
-        for (auto& v : rndstring)
+        for (const auto& v : rndstring) {
+            ahash::Hasher hasher{rseed};
+            hasher.consume(v.data(), v.size());
+            sum += hasher.finalize();
+        }
+        t_find = (getus() - start) / 1000; assert(sum);
+        printf("acxxhash    = %4d ms\n", (int)t_find);
+#endif
+
+#if ROBIN_HOOD_VERSION_MAJOR
+        start = getus();
+        for (const auto& v : rndstring)
             sum += robin_hood::hash_bytes(v.data(), v.size());
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("martius hash= %4d ms\n", t_find);
-
-#if 0
-        start = getus(); sum = 0;
-        for (auto& v : rndstring)
-            sum += emhash8::HashMap<int,int>::wyhashstr (v.data(), v.size());
-        t_find = (getus() - start) / 1000; assert(sum);
-        printf("emhash8 hash= %4d ms\n", t_find);
+        printf("martius hash= %4d ms\n", (int)t_find);
 #endif
 
-        start = getus(); sum = 0;
-        for (auto& v : rndstring)
+#if 0
+        start = getus(); sum += 0;
+        for (const auto& v : rndstring)
+            sum += emhash8::HashMap<int,int>::wyhashstr (v.data(), v.size());
+        t_find = (getus() - start) / 1000; assert(sum);
+        printf("emhash8 hash= %4d ms\n", (int)t_find);
+#endif
+
+        start = getus(); sum += 0;
+        for (const auto& v : rndstring)
           sum += ankerl::unordered_dense::detail::wyhash::hash(v.data(), v.size());
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("ankerl hash = %4d ms\n", t_find);
+        printf("ankerl hash = %4d ms\n", (int)t_find);
 
-#if ABSL_HMAP && ABSL
+#ifdef ABSL_HASH
         start = getus();
-        for (auto& v : rndstring)
+        for (const auto& v : rndstring)
             sum += absl::Hash<std::string>()(v);
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("absl hash   = %4d ms\n", t_find);
+        printf("absl hash   = %4d ms\n", (int)t_find);
 #endif
 
 #ifdef PHMAP_VERSION_MAJOR
         start = getus();
-        for (auto& v : rndstring)
+        for (const auto& v : rndstring)
             sum += phmap::Hash<std::string>()(v);
         t_find = (getus() - start) / 1000; assert(sum);
-        printf("phmap hash  = %4d ms\n", t_find);
+        printf("phmap hash  = %4d ms\n", (int)t_find);
 #endif
         putchar('\n');
     }
-    printf("sum = %ld\n", sum);
+    printf(" sum += %ld\n", sum);
+}
+
+template<typename MAP>
+static void TestHighLoadFactor(int id)
+{
+    std::random_device rd;
+    const auto rand_key = rd() + getus();
+#if 1
+    WyRand srngi(rand_key), srnge(rand_key);
+#else
+    std::mt19937_64 srngi(rand_key), srnge(rand_key);
+#endif
+
+    const auto max_lf   = 0.999f; //<= 0.9999f
+    const auto vsize    = 1u << (20 + id % 6);//must be power of 2
+    MAP myhash(vsize, max_lf);
+    //emhash7::HashMap<int64_t, int> myhash(vsize, max_lf);
+    //emhash5::HashMap<int64_t, int> myhash(vsize, max_lf);
+    //ankerl::unordered_dense::map<int64_t, int> myhash(vsize / 2); myhash.max_load_factor(max_lf);
+
+    auto nowus = getus();
+    for (size_t i = 0; i < size_t(vsize * max_lf); i++)
+        myhash.emplace(srngi(), i);
+    //assert(myhash.bucket_count() == vsize); //no rehash
+
+    //while (myhash.load_factor() < max_lf - 1e-3) myhash.emplace(srngi(), 0);
+    const auto insert_time = getus() - nowus; nowus = getus();
+    //erase & insert at a fixed load factor
+    for (size_t i = 0; i < vsize; i++) {
+        myhash.erase(srnge()); //erase a exist old key
+        myhash[srngi()] = 1;
+    }
+    const auto erase_time = getus() - nowus;
+    printf("vsize = %d, load factor = %.4f, insert/erase = %ld/%ld ms\n",
+        vsize, myhash.load_factor(), insert_time / 1000, erase_time / 1000);
+    //assert(myhash.bucket_count() == vsize); //no rehash
+    //assert(myhash.load_factor() >= max_lf - 0.001);
 }
 
 int main(int argc, char* argv[])
 {
-    TestApi();
-    benchIntRand(1e8+8);
-    benchStringHash(1e6+6, 4, 16);
+    printInfo(nullptr);
+    srand((unsigned)time(nullptr));
 
-    size_t n = (int)1e6, loop = 12345678;
+    if (argc == 2) {
+        TestApi();
+        benchIntRand(1e8+8);
+        benchStringHash(1e6+6, 8, 32);
+    }
+
+    size_t n = (int)1e7, loop = 12345678;
     if (argc > 1 && isdigit(argv[1][0]))
         n = atoi(argv[1]);
     if (argc > 2 && isdigit(argv[2][0]))
         loop = atoi(argv[2]);
 
 #ifndef GCOV
-    RandTest(n, loop);
+    RandTest(n, (int)loop);
 #endif
+
+    for (int i = 0; i < 6; i++) {
+        TestHighLoadFactor<emhash7::HashMap<uint64_t, int>>(i);
+        TestHighLoadFactor<emhash8::HashMap<uint64_t, int>>(i);
+    }
 
     return 0;
 }
-

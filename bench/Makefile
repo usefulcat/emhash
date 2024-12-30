@@ -1,13 +1,14 @@
-ifeq ($(shell expr `g++ -dumpversion` '>=' 1.), 1)
-CXX?=g++ -fwhole-program
-endif
+#ifeq ($(shell expr `g++ -dumpversion` '>=' 1.), 1)
+#CXX?=g++ -fwhole-program
+#endif
 
-ifeq ($(shell expr `clang++ -dumpversion` '>=' 1.), 1)
-CXX?=clang++ -stdlib=libc++
+#ifeq ($(shell expr `clang++ -dumpversion` '>=' 1.), 1)
+#CXX?=clang++ -stdlib=libc++
 #sudo apt install libc++abi-12-dev libstdc++-dev-12
-endif
+#endif
 
-CXXFLAGS = -flto -O3 -march=native -mtune=native -I.. -I../thirdparty -DNDEBUG=1
+CXXFLAGS =-O3 -DNDEBUG=1 -march=native -I.. -I../thirdparty
+#-march=armv8.6-a -fpermissive
 #-I/usr/local/include
 
 ifneq ($(FOLLY),)
@@ -81,7 +82,7 @@ CXXFLAGS += -DAVX2_EHASH=$(AVX2) -mavx2
 endif
 
 ifneq ($(H2),)
-CXXFLAGS += -DEMH_H2=1
+CXXFLAGS += -DEMH_H2=$(H2)
 endif
 
 ifneq ($(SMAP),)
@@ -102,7 +103,7 @@ ifneq ($(check),)
 CXXFLAGS += -fsanitize=undefined -g
 endif
 
-ifneq ($(addr),)
+ifneq ($(santi),)
 CXXFLAGS += -fsanitize=address
 endif
 
@@ -119,29 +120,36 @@ CXXFLAGS += $(MF)
 endif
 
 ifneq ($(CK),)
-CXXFLAGS += -I../thirdparty/ck -I../thirdparty/ck/base -DCK_HMAP=1
+CXXFLAGS += -std=c++20 -I../thirdparty/ck -I../thirdparty/ck/base -DCK_HMAP=1
 endif
 
-CXXFLAGS += -static -static-libstdc++ #clang libc++ ?
+CXXFLAGS += -flto=auto # -static clang libc++ -static-libstdc++?
+
+ifneq ($(PSL),)
+CXXFLAGS += -DPSL= (PSL)
+endif
 
 all:
 ifneq ($(QB),)
-	$(CXX) $(CXXFLAGS) -I. qbench.cpp -o qbench
+	$(CXX) $(CXXFLAGS) -std=c++20 -I. qbench.cpp -o qbench
 endif
 
-	$(CXX) $(CXXFLAGS) martinus_bench.cpp -o mbench
+	$(CXX) $(CXXFLAGS) -Wextra -Wpedantic martin_bench.cpp -o mbench
+	$(CXX) $(CXXFLAGS) hash_join.cpp -o join_hash
 	$(CXX) $(CXXFLAGS) ebench.cpp -o ebench
 	$(CXX) $(CXXFLAGS) buint64.cpp -o bi
 	$(CXX) $(CXXFLAGS) bstring.cpp -o bs
+	$(CXX) $(CXXFLAGS) word_count.cpp -o wc
 	$(CXX) $(CXXFLAGS) tbench.cpp -o tbench
-	$(CXX) $(CXXFLAGS) app.cpp -o app
 	$(CXX) $(CXXFLAGS) sbench.cpp -o sb
 	$(CXX) $(CXXFLAGS) zhash_bench.cc -o zbench
 	$(CXX) $(CXXFLAGS) hbench.cpp -o hbench
 	$(CXX) $(CXXFLAGS) simple_bench.cpp -o simbench
 	$(CXX) $(CXXFLAGS) fbench.cpp -o fbench
+	$(CXX) $(CXXFLAGS) app.cpp -o app
+	$(CXX) $(CXXFLAGS) -fopenmp hash_join2.cpp -o join_hash2
 ifneq ($(EMH),)
-	$(CXX) $(CXXFLAGS) -DEMH_HASH2=1 template.cc -o template
+	$(CXX) $(CXXFLAGS) template.cc -o template
 	$(CXX) $(CXXFLAGS) patch_bench.cpp -o pabench
 	$(CXX) $(CXXFLAGS) ph_bench.cpp -o phbench
 endif
@@ -152,7 +160,9 @@ mb:
 	./mbench
 qb:
 	./qbench
+ww:
+	./wc
 
 clean:
-	rm -rf ebench sb mbench hbench simbench pabench phbench fbench app zbench qbench
+	rm -rf ebench sb mbench hbench simbench pabench phbench fbench app zbench qbench wc bi bs
 

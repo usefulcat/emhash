@@ -14,10 +14,10 @@
 #include "tsl/hopscotch_map.h"
 #include "ska/flat_hash_map.hpp"
 #include "ska/bytell_hash_map.hpp"
-#include "martinus/robin_hood.h"
-//#include "emilib/emilib32.hpp"
-#include "emilib/emilib.hpp"
-#include "emilib/emilib2.hpp"
+#include "martin/robin_hood.h"
+
+#include "emilib/emilib2ss.hpp"
+#include "emilib/emilib2o.hpp"
 
 #include "emhash/hash_table2.hpp"
 #include "emhash/hash_table3.hpp"
@@ -103,7 +103,7 @@ void bench(char const* title)
     double t_find = std::chrono::duration_cast<std::chrono::duration<double>>(my_clock::now() - start).count();
     double t_all = std::chrono::duration_cast<std::chrono::duration<double>>(my_clock::now() - now).count();
 
-    printf("%6.2f %6.2f insert %6.2f iter %6.2f find %zd result: %s|%.2f|map size %zd\n", 
+    printf("%6.2f %6.2f insert %6.2f iter %6.2f find %zd result: %s|%.2f|map size %zd\n",
             t_all, t_insert, t_iter, t_find, result, title, map.load_factor(), sizeof(Map));
 }
 

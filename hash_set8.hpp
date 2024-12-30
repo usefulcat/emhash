@@ -1,9 +1,10 @@
 // emhash8::HashSet for C++11/14/17
 // version 1.6.3
+// https://github.com/ktprime/emhash/blob/master/hash_set8.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2019-2022 Huang Yuanbing & bailuzhou AT 163.com
+// Copyright (c) 2019-2024 Huang Yuanbing & bailuzhou AT 163.com
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -73,17 +74,13 @@ constexpr uint32_t INACTIVE = 0xAAAAAAAA;
 constexpr uint32_t END      = 0-0x1u;
 constexpr uint32_t EAD      = 2;
 
-#ifndef EMH_DEFAULT_LOAD_FACTOR
-    constexpr static float EMH_DEFAULT_LOAD_FACTOR = 0.80f;
-#endif
-#if EMH_CACHE_LINE_SIZE < 32
-    constexpr static uint32_t EMH_CACHE_LINE_SIZE  = 64;
-#endif
-
 /// A cache-friendly hash table with open addressing, linear/quadratic probing and power-of-two capacity
 template <typename KeyT, typename HashT = std::hash<KeyT>, typename EqT = std::equal_to<KeyT>>
 class HashSet
 {
+#ifndef EMH_DEFAULT_LOAD_FACTOR
+    constexpr static float EMH_DEFAULT_LOAD_FACTOR = 0.80f;
+#endif
 public:
     using htype = HashSet<KeyT, HashT, EqT>;
     using value_type = KeyT;
@@ -302,11 +299,13 @@ public:
     template<typename Con>
     bool operator != (const Con& rhs) const { return !(*this == rhs); }
 
-    ~HashSet()
+    ~HashSet() noexcept
     {
         clearkv();
         free(_pairs);
         free(_index);
+        _index = nullptr;
+        _pairs = nullptr;
     }
 
     void clone(const HashSet& rhs)
@@ -348,6 +347,14 @@ public:
     inline iterator first() const { return {this, 0}; }
     inline iterator last() const { return {this, _num_filled - 1}; }
 
+    value_type& front() { return _pairs[0]; }
+    const value_type& front() const { return _pairs[0]; }
+    value_type& back() { return _pairs[_num_filled - 1]; }
+    const value_type& back() const { return _pairs[_num_filled - 1]; }
+
+    void pop_front() { erase(begin()); } //TODO. only erase first without move last
+    void pop_back() { erase(last()); }
+
     iterator begin() { return first(); }
     const_iterator cbegin() const { return first(); }
     const_iterator begin() const { return first(); }
@@ -355,6 +362,9 @@ public:
     inline iterator end() { return {this, _num_filled}; }
     inline const_iterator cend() const { return {this, _num_filled}; }
     const_iterator end() const { return cend(); }
+
+    const value_type* values() const { return _pairs; }
+    const Index* index() const { return _index; }
 
     size_type size() const { return _num_filled; }
     bool empty() const { return _num_filled == 0; }
@@ -423,6 +433,7 @@ public:
 
     size_type get_diss(size_type bucket, size_type next_bucket, const size_type slots) const
     {
+        constexpr static uint32_t EMH_CACHE_LINE_SIZE  = 64;
         auto pbucket = reinterpret_cast<uint64_t>(&_pairs[bucket]);
         auto pnext   = reinterpret_cast<uint64_t>(&_pairs[next_bucket]);
         if (pbucket / EMH_CACHE_LINE_SIZE == pnext / EMH_CACHE_LINE_SIZE)
@@ -669,7 +680,7 @@ public:
     }
 
     template <class... Args>
-    inline std::pair<iterator, bool> emplace(Args&&... args)
+    inline std::pair<iterator, bool> emplace(Args&&... args) noexcept
     {
         check_expand_need();
         return do_insert(std::forward<Args>(args)...);
@@ -679,6 +690,7 @@ public:
     template <class... Args>
     iterator emplace_hint(const_iterator hint, Args&&... args)
     {
+        (void)hint;
         check_expand_need();
         return do_insert(std::forward<Args>(args)...).first;
     }
@@ -809,6 +821,7 @@ public:
     /// Make room for this many elements
     bool reserve(uint64_t num_elems, bool force)
     {
+        (void)force;
         const auto required_buckets = (uint32_t)(num_elems * _mlf >> 27);
         if (EMH_LIKELY(required_buckets < _mask)) // && !force
             return false;
@@ -1203,9 +1216,9 @@ private:
 
         //find next linked bucket and check key
         while (true) {
-            const auto slot = EMH_SLOT(_index, next_bucket);
+            const auto slot2 = EMH_SLOT(_index, next_bucket);
             if (EMH_UNLIKELY(EMH_EQHASH(next_bucket, key_hash))) {
-                if (EMH_LIKELY(_eq(key, EMH_KEY(_pairs, slot))))
+                if (EMH_LIKELY(_eq(key, EMH_KEY(_pairs, slot2))))
                 return next_bucket;
             }
 
@@ -1430,10 +1443,10 @@ one-way search strategy.
         return (((uint64_t)p[0]) << 16) | (((uint64_t)p[k >> 1]) << 8) | p[k - 1];
     }
 
-    static constexpr uint64_t secret[4] = {
-        0xa0761d6478bd642full, 0xe7037ed1a0b428dbull,
-        0x8ebc6af09c88c6e3ull, 0x589965cc75374cc3ull};
-
+    inline static const uint64_t secret[4] = {
+        0x2d358dccaa6c78a5ull, 0x8bb84b93962eacc9ull,
+        0x4b33a62ed433d4a3ull, 0x4d5a2da51de1aa47ull};
+public:
     //wyhash main function https://github.com/wangyi-fudan/wyhash
     static uint64_t wyhashstr(const void *key, const size_t len)
     {
@@ -1508,8 +1521,8 @@ template<typename UType, typename std::enable_if<std::is_same<UType, std::string
     }
 
 private:
-    value_type*_pairs;
     Index*    _index;
+    value_type*_pairs;
 
     HashT     _hasher;
     EqT       _eq;

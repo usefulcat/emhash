@@ -44,6 +44,8 @@ namespace priv {
 
 #if !defined(PHMAP_NON_DETERMINISTIC) && !defined(PHMAP_DISABLE_DUMP)
 
+static constexpr size_t s_version_base = std::numeric_limits<size_t>::max() - 10;
+static constexpr size_t s_version = s_version_base;
 // ------------------------------------------------------------------------
 // dump/load for raw_hash_set
 // ------------------------------------------------------------------------
@@ -53,12 +55,14 @@ bool raw_hash_set<Policy, Hash, Eq, Alloc>::phmap_dump(OutputArchive& ar) const 
     static_assert(type_traits_internal::IsTriviallyCopyable<value_type>::value,
                     "value_type should be trivially copyable");
 
+    ar.saveBinary(&s_version, sizeof(size_t));
     ar.saveBinary(&size_, sizeof(size_t));
     ar.saveBinary(&capacity_, sizeof(size_t));
     if (size_ == 0)
         return true;
     ar.saveBinary(ctrl_,  sizeof(ctrl_t) * (capacity_ + Group::kWidth + 1));
     ar.saveBinary(slots_, sizeof(slot_type) * capacity_);
+    ar.saveBinary(&growth_left(), sizeof(size_t));
     return true;
 }
 
@@ -68,7 +72,15 @@ bool raw_hash_set<Policy, Hash, Eq, Alloc>::phmap_load(InputArchive& ar) {
     static_assert(type_traits_internal::IsTriviallyCopyable<value_type>::value,
                     "value_type should be trivially copyable");
     raw_hash_set<Policy, Hash, Eq, Alloc>().swap(*this); // clear any existing content
-    ar.loadBinary(&size_, sizeof(size_t));
+
+    size_t version = 0;
+    ar.loadBinary(&version, sizeof(size_t));
+    if (version < s_version_base) {
+        // we didn't store the version, version actually contains the size
+        size_ = version;
+    } else {
+        ar.loadBinary(&size_, sizeof(size_t));
+    }
     ar.loadBinary(&capacity_, sizeof(size_t));
 
     if (capacity_) {
@@ -79,6 +91,12 @@ bool raw_hash_set<Policy, Hash, Eq, Alloc>::phmap_load(InputArchive& ar) {
         return true;
     ar.loadBinary(ctrl_,  sizeof(ctrl_t) * (capacity_ + Group::kWidth + 1));
     ar.loadBinary(slots_, sizeof(slot_type) * capacity_);
+    if (version >= s_version_base) {
+        // growth_left should be restored after calling initialize_slots() which resets it.
+        ar.loadBinary(&growth_left(), sizeof(size_t));
+    } else {
+       drop_deletes_without_resize();
+    }
     return true;
 }
 
@@ -123,7 +141,7 @@ bool parallel_hash_set<N, RefSet, Mtx_, Policy, Hash, Eq, Alloc>::phmap_load(Inp
         return false;
     }
 
-    for (size_t i = 0; i < submap_count; ++i) {            
+    for (size_t i = 0; i < submap_count; ++i) {
         auto& inner = sets_[i];
         typename Lockable::UniqueLock m(const_cast<Inner&>(inner));
         if (!inner.set_.phmap_load(ar)) {
@@ -153,8 +171,12 @@ public:
         ofs_.open(file_path, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     }
 
+    ~BinaryOutputArchive() = default;
+    BinaryOutputArchive(const BinaryOutputArchive&) = delete;
+    BinaryOutputArchive& operator=(const BinaryOutputArchive&) = delete;
+
     bool saveBinary(const void *p, size_t sz) {
-        ofs_.write(reinterpret_cast<const char*>(p), sz);
+        ofs_.write(reinterpret_cast<const char*>(p), (std::streamsize)sz);
         return true;
     }
 
@@ -182,8 +204,12 @@ public:
         ifs_.open(file_path, std::ofstream::in | std::ofstream::binary);
     }
 
+    ~BinaryInputArchive() = default;
+    BinaryInputArchive(const BinaryInputArchive&) = delete;
+    BinaryInputArchive& operator=(const BinaryInputArchive&) = delete;
+
     bool loadBinary(void* p, size_t sz) {
-        ifs_.read(reinterpret_cast<char*>(p), sz);
+        ifs_.read(reinterpret_cast<char*>(p),  (std::streamsize)sz);
         return true;
     }
 
@@ -199,7 +225,7 @@ public:
     {
         return v->phmap_load(*this);
     }
-    
+
 private:
     std::ifstream ifs_;
 };
@@ -211,7 +237,7 @@ private:
 
 template <class T>
 using PhmapTrivCopyable = typename phmap::type_traits_internal::IsTriviallyCopyable<T>;
-    
+
 namespace cereal
 {
     // Overload Cereal serialization code for phmap::flat_hash_map
@@ -224,7 +250,7 @@ namespace cereal
     }
 
     template <class K, class V, class Hash, class Eq, class A>
-    void load(typename std::enable_if<PhmapTrivCopyable<K>::value && PhmapTrivCopyable<V>::value, typename cereal::BinaryInputArchive>::type &ar, 
+    void load(typename std::enable_if<PhmapTrivCopyable<K>::value && PhmapTrivCopyable<V>::value, typename cereal::BinaryInputArchive>::type &ar,
               phmap::flat_hash_map<K, V, Hash, Eq, A>  &hmap)
     {
         hmap.phmap_load(ar);
@@ -241,7 +267,7 @@ namespace cereal
     }
 
     template <class K, class V, class Hash, class Eq, class A, size_t N, class Mtx_>
-    void load(typename std::enable_if<PhmapTrivCopyable<K>::value && PhmapTrivCopyable<V>::value, typename cereal::BinaryInputArchive>::type &ar, 
+    void load(typename std::enable_if<PhmapTrivCopyable<K>::value && PhmapTrivCopyable<V>::value, typename cereal::BinaryInputArchive>::type &ar,
               phmap::parallel_flat_hash_map<K, V, Hash, Eq, A, N, Mtx_>  &hmap)
     {
         hmap.phmap_load(ar);
@@ -257,7 +283,7 @@ namespace cereal
     }
 
     template <class K, class Hash, class Eq, class A>
-    void load(typename std::enable_if<PhmapTrivCopyable<K>::value, typename cereal::BinaryInputArchive>::type &ar, 
+    void load(typename std::enable_if<PhmapTrivCopyable<K>::value, typename cereal::BinaryInputArchive>::type &ar,
               phmap::flat_hash_set<K, Hash, Eq, A>  &hset)
     {
         hset.phmap_load(ar);
@@ -273,7 +299,7 @@ namespace cereal
     }
 
     template <class K, class Hash, class Eq, class A, size_t N, class Mtx_>
-    void load(typename std::enable_if<PhmapTrivCopyable<K>::value, typename cereal::BinaryInputArchive>::type &ar, 
+    void load(typename std::enable_if<PhmapTrivCopyable<K>::value, typename cereal::BinaryInputArchive>::type &ar,
               phmap::parallel_flat_hash_set<K, Hash, Eq, A, N, Mtx_>  &hset)
     {
         hset.phmap_load(ar);

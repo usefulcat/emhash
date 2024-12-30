@@ -1,4 +1,3 @@
-#undef NDEBUG
 #include <cassert>
 #include <cstdio>
 #include <chrono>
@@ -7,6 +6,10 @@
 #include <unordered_map>
 #include <vector>
 #include <functional>
+
+#if HAVE_BOOST
+#include <boost/unordered/unordered_flat_map.hpp>
+#endif
 
 #if QC_HASH
 #include "qchash/qc-hash.hpp"
@@ -33,10 +36,10 @@
 #include "tsl/robin_map.h"
 #include "tsl/hopscotch_map.h"
 #include "tsl/bhopscotch_map.h"
-#include "tsl/array_map.h"
+//#include "tsl/array_map.h"
 #include "tsl/ordered_map.h"
 #include "tsl/sparse_map.h"
-#include "tsl/htrie_map.h"
+//#include "tsl/htrie_map.h"
 
 #include "google/dense_hash_map"
 #include "zhashmap/hashmap.h"
@@ -44,9 +47,9 @@
 #include "hash_table7.hpp"
 #include "hash_table8.hpp"
 #include "hash_table5.hpp"
-#include "emilib/emilib2.hpp"
-#include "emilib/emilib.hpp"
-#include "martinus/robin_hood.h"
+#include "emilib/emilib2o.hpp"
+#include "emilib/emilib2s.hpp"
+#include "martin/robin_hood.h"
 #include "phmap/phmap.h"
 #include "ska/flat_hash_map.hpp"
 #include "ska/bytell_hash_map.hpp"
@@ -303,8 +306,8 @@ int main(int argc, char **argv)
     bench_spread<emhash5::HashMap<size_t,size_t>>("emhash5::HashMap::operator[]",count);
     bench_spread<emhash7::HashMap<size_t,size_t>>("emhash7::HashMap::operator[]",count);
     bench_spread<emilib2::HashMap<size_t,size_t>>("emilib2::HashMap::operator[]",count);
-    bench_spread<emilib::HashMap<size_t,size_t>>("emilib::HashMap::operator[]",count);
-    bench_spread<robin_hood::unordered_flat_map<size_t,size_t>>("martinus::flat_map::operator[]",count);
+    bench_spread<emilib3::HashMap<size_t,size_t>>("emilib3::HashMap::operator[]",count);
+    bench_spread<robin_hood::unordered_flat_map<size_t,size_t>>("martin::flat_map::operator[]",count);
     bench_spread<phmap::flat_hash_map<size_t,size_t>>("phmap::flat_hash_map::operator[]",count);
 
     heading();
@@ -322,11 +325,16 @@ int main(int argc, char **argv)
     bench_map_google<google::dense_hash_map<size_t,size_t>>("google::dense_hash_map", count);
     bench_map<absl::flat_hash_map<size_t,size_t>>("absl::flat_hash_map",count);
 #endif
+
+#if HAVE_BOOST
+    bench_map<boost::unordered_flat_map<size_t,size_t>>("boost::flat_hash_map",count);
+#endif
+
     bench_map<emhash5::HashMap<size_t,size_t>>("emhash5::HashMap",count);
     bench_map<emhash7::HashMap<size_t,size_t>>("emhash7::HashMap",count);
     bench_map<emilib2::HashMap<size_t,size_t>>("emilib2::HashMap",count);
-    bench_map<emilib::HashMap<size_t,size_t>>("emilib::HashMap",count);
-    //bench_map<robin_hood::unordered_node_map<size_t,size_t>>("martinus::node_hash",count);
+    bench_map<emilib3::HashMap<size_t,size_t>>("emilib2::HashMap",count);
+    //bench_map<robin_hood::unordered_node_map<size_t,size_t>>("martin::node_hash",count);
     bench_map<phmap::flat_hash_map<size_t,size_t>>("phmap::flat_hash_hash",count);
     bench_map<phmap::node_hash_map<size_t,size_t>>("phmap::node_hash_hash",count);
     bench_map<ska::flat_hash_map<size_t,size_t>>("ska::flat_hash_hash",count);

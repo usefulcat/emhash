@@ -50,7 +50,7 @@ struct sherwood_v8_constants
     // 3. add 44 more triangular numbers at a much steeper growth rate
     // to get a sequence that allows large jumps so that a table
     // with 10000 sequential numbers doesn't endlessly re-allocate
-    static constexpr size_t jump_distances[num_jump_distances + 2]
+    static constexpr uint64_t jump_distances[num_jump_distances + 2]
     {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 
@@ -62,14 +62,14 @@ struct sherwood_v8_constants
 
         3741, 8385, 18915, 42486, 95703, 215496, 485605, 1091503, 2456436,
         5529475, 12437578, 27986421, 62972253, 141700195, 318819126, 717314626,
-        1614000520, 3631437253, 8170829695, 18384318876, 41364501751,
-        93070021080, 209407709220, 471167588430, 1060127437995, 2385287281530,
-        5366895564381, 12075513791265, 27169907873235, 61132301007778,
-        137547673121001, 309482258302503, 696335090510256, 1566753939653640,
-        3525196427195653, 7931691866727775, 17846306747368716,
-        40154190394120111, 90346928493040500, 203280588949935750,
-        457381324898247375, 1029107980662394500, 2315492957028380766,
-        5209859150892887590, 0, 0
+        1614000520ull, 3631437253ull, 8170829695ull, 18384318876ull, 41364501751ull,
+        93070021080ull, 209407709220ull, 471167588430ull, 1060127437995ull, 2385287281530ull,
+        5366895564381ull, 12075513791265ull, 27169907873235ull, 61132301007778ull,
+        137547673121001ull, 309482258302503ull, 696335090510256ull, 1566753939653640ull,
+        3525196427195653ull, 7931691866727775ull, 17846306747368716ull,
+        40154190394120111ull, 90346928493040500ull, 203280588949935750ull,
+        457381324898247375ull, 1029107980662394500ull, 2315492957028380766ull,
+        5209859150892887590ull, 0, 0
     };
 };
 template<typename T>
@@ -89,7 +89,7 @@ constexpr int8_t sherwood_v8_constants<T>::bits_for_distance;
 template<typename T>
 constexpr int sherwood_v8_constants<T>::num_jump_distances;
 template<typename T>
-constexpr size_t sherwood_v8_constants<T>::jump_distances[num_jump_distances + 2];
+constexpr uint64_t sherwood_v8_constants<T>::jump_distances[num_jump_distances + 2];
 
 template<typename T, uint8_t BlockSize>
 struct sherwood_v8_block

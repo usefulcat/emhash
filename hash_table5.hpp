@@ -1,10 +1,10 @@
 // emhash5::HashMap for C++11/14/17
-// version 2.1.1
-// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+// version 2.1.2
+// https://github.com/ktprime/emhash/blob/master/hash_table5.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2019-2022 Huang Yuanbing & bailuzhou AT 163.com
+// Copyright (c) 2019-2024 Huang Yuanbing & bailuzhou AT 163.com
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -84,19 +84,28 @@
     #define EMH_BUCKET(p,n)  p[n].bucket
     #define EMH_PREVET(p,n)  *(size_type*)(&p[n].first)
     #define EMH_PKV(p,n)     p[n]
-    #define EMH_NEW(key, val, bucket) new(_pairs + bucket) PairT(key, val, bucket); _num_filled ++
+    #define EMH_NEW(key, val, bucket) new(_pairs + bucket) PairT(key, val, bucket); _num_filled ++; if (bucket < _first) _first = bucket
 #endif
 
-#define EMH_EMPTY(p, b) (0 > (int)EMH_BUCKET(p, b))
+#define EMH_EMPTY(p, b) (0 > (size_type)EMH_BUCKET(p, b))
 
 namespace emhash5 {
 
 #if EMH_SIZE_TYPE_64BIT
-    typedef uint64_t size_type;
+    typedef int64_t size_type;
     static constexpr size_type INACTIVE = 0 - 0x1ull;
-#else
-    typedef uint32_t size_type;
+#elif EMH_SIZE_TYPE_16BIT == 0
+    typedef int32_t size_type;
     const constexpr size_type INACTIVE = 0xFFFFFFFF;
+#else
+    typedef int16_t size_type;
+    const constexpr size_type INACTIVE = 0xFFFF;
+#endif
+
+#ifdef EMH_ALLOC
+#ifndef EMH_MALIGN
+    static constexpr uint32_t EMH_MALIGN = 16;
+#endif
 #endif
 
 template <typename First, typename Second>
@@ -209,11 +218,8 @@ class HashMap
 {
 #ifndef EMH_DEFAULT_LOAD_FACTOR
     constexpr static float EMH_DEFAULT_LOAD_FACTOR = 0.80f;
+#endif
     constexpr static float EMH_MIN_LOAD_FACTOR     = 0.25f; //< 0.5
-#endif
-#if EMH_CACHE_LINE_SIZE < 32
-    constexpr static uint32_t EMH_CACHE_LINE_SIZE  = 64;
-#endif
 
 public:
     typedef HashMap<KeyT, ValueT, HashT, EqT> htype;
@@ -267,7 +273,7 @@ public:
         }
 
         reference operator*() const { return _map->EMH_PKV(_pairs, _bucket); }
-        pointer operator->() const { return &(_map->EMH_PKV(_pairs, _bucket)); }
+        pointer operator->() const { return std::addressof(_map->EMH_PKV(_pairs, _bucket)); }
 
         bool operator==(const iterator& rhs) const { return _bucket == rhs._bucket; }
         bool operator!=(const iterator& rhs) const { return _bucket != rhs._bucket; }
@@ -280,7 +286,7 @@ public:
     private:
         void goto_next_element()
         {
-            while ((int)_map->EMH_BUCKET(_pairs, ++_bucket) < 0);
+            while ((size_type)_map->EMH_BUCKET(_pairs, ++_bucket) < 0);
         }
 
     public:
@@ -326,7 +332,7 @@ public:
     private:
         void goto_next_element()
         {
-            while ((int)_map->EMH_BUCKET(_pairs, ++_bucket) < 0);
+            while ((size_type)_map->EMH_BUCKET(_pairs, ++_bucket) < 0);
         }
 
     public:
@@ -342,6 +348,7 @@ public:
 #if EMH_HIGH_LOAD
         _ehead = 0;
 #endif
+        _mlf = (uint32_t)((1 << 27) / EMH_DEFAULT_LOAD_FACTOR);
         max_load_factor(mlf);
         rehash(bucket);
     }
@@ -363,7 +370,7 @@ public:
             _pairs = alloc_bucket(rhs._num_buckets);
             clone(rhs);
         } else {
-            init(rhs._num_filled + 2, EMH_DEFAULT_LOAD_FACTOR);
+            init(rhs._num_filled + 2, rhs.max_load_factor());
             for (auto it = rhs.begin(); it != rhs.end(); ++it)
                 insert_unique(it->first, it->second);
         }
@@ -432,10 +439,13 @@ public:
             clear();
             if (rhs.empty())
                 return *this;
-            if (_pairs != (PairT*)_small)
-                free(_pairs);
-            if (rhs._num_buckets > EMH_SMALL_SIZE)
+            if (rhs._num_buckets > _num_buckets) {
+                if (_pairs != (PairT*)_small) {
+                    free(_pairs); _pairs = (PairT*)_small;
+                }
+                if (rhs._num_buckets > EMH_SMALL_SIZE)
                 _pairs = alloc_bucket(rhs._num_buckets);
+            }
             clone(rhs);
             rhs.clear();
             return *this;
@@ -470,6 +480,7 @@ public:
         if (_pairs != (PairT*)_small)
 #endif
         free(_pairs);
+        _pairs = nullptr;
     }
 
     void clone(const HashMap& rhs) noexcept
@@ -480,6 +491,7 @@ public:
         _num_filled  = rhs._num_filled;
         _mlf         = rhs._mlf;
         _last        = rhs._last;
+        _first       = rhs._first;
         _mask        = rhs._mask;
 #if EMH_HIGH_LOAD
         _ehead       = rhs._ehead;
@@ -488,18 +500,18 @@ public:
         auto opairs  = rhs._pairs;
 
         if (is_copy_trivially())
-            memcpy(_pairs, opairs, (_num_buckets + 2) * sizeof(PairT));
+            memcpy((char*)_pairs, opairs, (_num_buckets + 2) * sizeof(PairT));
         else {
             for (size_type bucket = 0; bucket < _num_buckets; bucket++) {
                 auto next_bucket = EMH_BUCKET(_pairs, bucket) = EMH_BUCKET(opairs, bucket);
-                if ((int)next_bucket >= 0)
+                if ((size_type)next_bucket >= 0)
                     new(_pairs + bucket) PairT(opairs[bucket]);
 #if EMH_HIGH_LOAD
                 else if (next_bucket != INACTIVE)
                     EMH_PREVET(_pairs, bucket) = EMH_PREVET(opairs, bucket);
 #endif
             }
-            memcpy(_pairs + _num_buckets, opairs + _num_buckets, sizeof(PairT) * 2);
+            memcpy((char*)(_pairs + _num_buckets), opairs + _num_buckets, sizeof(PairT) * 2);
         }
     }
 
@@ -528,6 +540,7 @@ public:
         std::swap(_mask, rhs._mask);
         std::swap(_mlf, rhs._mlf);
         std::swap(_last, rhs._last);
+        std::swap(_first, rhs._first);
 #if EMH_HIGH_LOAD
         std::swap(_ehead, rhs._ehead);
 #endif
@@ -539,10 +552,11 @@ public:
         if (_num_filled == 0)
             return end();
 
-        size_type bucket = 0;
+        size_type bucket = _first;
         while (EMH_EMPTY(_pairs, bucket)) {
             ++bucket;
         }
+        _first = bucket;
         return {this, bucket};
     }
 
@@ -563,36 +577,36 @@ public:
         if (_num_filled == 0)
             return end();
 
-        size_type bucket = 0;
+        size_type bucket = _first;
         while (EMH_EMPTY(_pairs, bucket)) {
             ++bucket;
         }
         return {this, bucket};
     }
-    inline const_iterator begin() const noexcept { return cbegin(); }
+    const_iterator begin() const noexcept { return cbegin(); }
 
-    inline iterator end() noexcept { return {this, _num_buckets}; }
-    inline const_iterator end()  const noexcept { return cend(); }
-    inline const_iterator cend() const noexcept { return {this, _num_buckets}; }
+    iterator end() noexcept { return {this, _num_buckets}; }
+    const_iterator end()  const noexcept { return cend(); }
+    const_iterator cend() const noexcept { return {this, _num_buckets}; }
 
-    inline size_type size() const noexcept { return _num_filled; }
-    inline bool empty() const noexcept { return _num_filled == 0; }
-    inline size_type bucket_count() const noexcept { return _num_buckets; }
+    size_type size() const noexcept { return _num_filled; }
+    bool empty() const noexcept { return _num_filled == 0; }
+    size_type bucket_count() const noexcept { return _num_buckets; }
 
-    inline HashT hash_function() const noexcept { return static_cast<const HashT&>(_hasher); }
-    inline EqT key_eq() const noexcept { return static_cast<const EqT&>(_eq); }
+    HashT hash_function() const noexcept { return static_cast<const HashT&>(_hasher); }
+    EqT key_eq() const noexcept { return static_cast<const EqT&>(_eq); }
 
-    inline float load_factor() const noexcept { return static_cast<float>(_num_filled) / _num_buckets; }
-    inline float max_load_factor() const noexcept { return (1 << 27) / (float)_mlf; }
-    void max_load_factor(float ml) noexcept
+    float load_factor() const noexcept { return static_cast<float>(_num_filled) / (float)_num_buckets; }
+    float max_load_factor() const noexcept { return (1 << 27) / (float)_mlf; }
+    void max_load_factor(float mlf) noexcept
     {
-        ml = std::min(ml, 0.991f);
-        ml = std::max(ml, EMH_MIN_LOAD_FACTOR);
+        mlf = std::min(ml, 0.999f);
+        mlf = std::max(ml, EMH_MIN_LOAD_FACTOR);
         _mlf = (uint32_t)((1 << 27) / ml);
     }
 
-    inline constexpr size_type max_size() const { return 1ull << (sizeof(size_type) * 8 - 1); }
-    inline constexpr size_type max_bucket_count() const { return max_size(); }
+    constexpr size_type max_size() const { return 1ull << (sizeof(size_type) * 8 - 1); }
+    constexpr size_type max_bucket_count() const { return max_size(); }
 
 #if EMH_STATIS
     //Returns the bucket number where the element with key k is located.
@@ -600,7 +614,7 @@ public:
     {
         const auto bucket = key_to_bucket(key);
         const auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if ((int)next_bucket < 0)
+        if ((size_type)next_bucket < 0)
             return 0;
         else if (bucket == next_bucket)
             return bucket + 1;
@@ -612,7 +626,7 @@ public:
     size_type bucket_size(const size_type bucket) const
     {
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if ((int)next_bucket < 0)
+        if ((size_type)next_bucket < 0)
             return 0;
 
         next_bucket = hash_main(bucket);
@@ -633,7 +647,7 @@ public:
     size_type get_main_bucket(const uint32_t bucket) const
     {
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if ((int)next_bucket < 0)
+        if ((size_type)next_bucket < 0)
             return INACTIVE;
 
         return hash_main(bucket);
@@ -641,8 +655,9 @@ public:
 
     size_type get_diss(uint32_t bucket, uint32_t next_bucket, const uint32_t slots) const
     {
-        auto pbucket = reinterpret_cast<uint64_t>(&_pairs[bucket]);
-        auto pnext   = reinterpret_cast<uint64_t>(&_pairs[next_bucket]);
+        constexpr static uint32_t EMH_CACHE_LINE_SIZE  = 64;
+        auto pbucket = reinterpret_cast<std::ptrdiff_t>(&_pairs[bucket]);
+        auto pnext   = reinterpret_cast<std::ptrdiff_t>(&_pairs[next_bucket]);
         if (pbucket / EMH_CACHE_LINE_SIZE == pnext / EMH_CACHE_LINE_SIZE)
             return 0;
         uint32_t diff = pbucket > pnext ? (pbucket - pnext) : (pnext - pbucket);
@@ -654,7 +669,7 @@ public:
     int get_bucket_info(const uint32_t bucket, uint32_t steps[], const uint32_t slots) const
     {
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if ((int)next_bucket < 0)
+        if ((size_type)next_bucket < 0)
             return -1;
 
         const auto main_bucket = hash_main(bucket);
@@ -721,80 +736,92 @@ public:
 
     // ------------------------------------------------------------
     template<typename K=KeyT>
-    inline iterator find(const K& key) noexcept
+    iterator find(const K& key) noexcept
     {
-        return {this, find_filled_bucket(key)};
+        return {this, find_filled_key(key)};
     }
 
     template<typename K=KeyT>
-    inline const_iterator find(const K& key) const noexcept
+    const_iterator find(const K& key) const noexcept
     {
-        return {this, find_filled_bucket(key)};
+        return {this, find_filled_key(key)};
     }
 
     template<typename K=KeyT>
-    inline iterator find(const K& key, size_type key_hash) noexcept
+    iterator find(const K& key, size_type key_hash) noexcept
     {
-        return {this, find_hash_bucket(key, key_hash)};
+        const auto main_bucket = key_hash & _mask;
+        return {this, find_hash_bucket(key, main_bucket)};
     }
 
     template<typename K=KeyT>
-    inline const_iterator find(const K& key, size_type key_hash) const noexcept
+    const_iterator find(const K& key, size_type key_hash) const noexcept
     {
-        return {this, find_hash_bucket(key, key_hash)};
+        const auto main_bucket = key_hash & _mask;
+        return {this, find_hash_bucket(key, main_bucket)};
     }
 
     template<typename K=KeyT>
-    inline ValueT& at(const K& key)
+    ValueT& at(const K& key)
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         //throw
         return EMH_VAL(_pairs, bucket);
     }
 
     template<typename K=KeyT>
-    inline const ValueT& at(const K& key) const
+    const ValueT& at(const K& key) const
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         return EMH_VAL(_pairs, bucket);
     }
 
     template<typename K=KeyT>
     ValueT& at(const K& key, size_type key_hash)
     {
-        const auto bucket = find_hash_bucket(key, key_hash);
+        const auto main_bucket = key_hash & _mask;
+        const auto bucket = find_hash_bucket(key, main_bucket);
         return EMH_VAL(_pairs, bucket);
     }
 
     template<typename K=KeyT>
     const ValueT& at(const K& key, size_type key_hash) const
     {
-        const auto bucket = find_hash_bucket(key, key_hash);
+        const auto main_bucket = key_hash & _mask;
+        const auto bucket = find_hash_bucket(key, main_bucket);
         return EMH_VAL(_pairs, bucket);
     }
 
     template<typename K=KeyT>
-    inline bool contains(const K& key) const noexcept
+    bool contains(const K& key) const noexcept
     {
-        return find_filled_bucket(key) != _num_buckets;
+        return find_filled_key(key) != _num_buckets;
     }
 
     template<typename K=KeyT>
-    inline bool contains(const K& key, size_type key_hash) const noexcept
+    bool contains(const K& key, size_type key_hash) const noexcept
     {
-        return find_hash_bucket(key, key_hash) != _num_buckets;
+        const auto main_bucket = key_hash & _mask;
+        return find_hash_bucket(key, main_bucket) != _num_buckets;
     }
 
     template<typename K=KeyT>
-    inline size_type count(const K& key) const noexcept
+    size_type count(const K& key) const noexcept
     {
-        return find_filled_bucket(key) == _num_buckets ? 0 : 1;
+        return find_filled_key(key) == _num_buckets ? 0 : 1;
     }
 
     template<typename K=KeyT>
-    inline size_type count(const K& key, size_type key_hash) const noexcept
+    size_type count(const K& key, size_type key_hash) const noexcept
     {
-        return find_hash_bucket(key, key_hash) == _num_buckets ? 0 : 1;
+        const auto main_bucket = key_hash & _mask;
+        return find_hash_bucket(key, main_bucket) == _num_buckets ? 0 : 1;
+    }
+
+    template<typename K=KeyT>
+    size_type count_hint(const K& key, size_type main_bucket) const noexcept
+    {
+        return find_hash_bucket(key, main_bucket) == _num_buckets ? 0 : 1;
     }
 
     template<typename K=KeyT>
@@ -835,7 +862,6 @@ public:
         }
     }
 
-#ifdef EMH_EXT
     /// Return the old value or ValueT() if it didn't exist.
     ValueT set_get(const KeyT& key, const ValueT& val)
     {
@@ -852,10 +878,11 @@ public:
         }
     }
 
+#ifdef EMH_EXT
     /// Returns the matching ValueT or nullptr if k isn't found.
     bool try_get(const KeyT& key, ValueT& val) const
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         const auto found = bucket != _num_buckets;
         if (found) {
             val = EMH_VAL(_pairs, bucket);
@@ -864,23 +891,23 @@ public:
     }
 
     /// Returns the matching ValueT or nullptr if k isn't found.
-    inline ValueT* try_get(const KeyT& key)
+    ValueT* try_get(const KeyT& key)
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         return bucket != _num_buckets ? &EMH_VAL(_pairs, bucket) : nullptr;
     }
 
     /// Const version of the above
-    inline ValueT* try_get(const KeyT& key) const
+    ValueT* try_get(const KeyT& key) const
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         return bucket != _num_buckets ? &EMH_VAL(_pairs, bucket) : nullptr;
     }
 
     /// set value if key exist
     bool try_set(const KeyT& key, const ValueT& val)
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         if (bucket == _num_buckets)
             return false;
 
@@ -891,18 +918,18 @@ public:
     /// set value if key exist
     bool try_set(const KeyT& key, ValueT&& val)
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         if (bucket == _num_buckets)
             return false;
 
-        EMH_VAL(_pairs, bucket) = std::forward<ValueT>(val);
+        EMH_VAL(_pairs, bucket) = std::move(val);
         return true;
     }
 
     /// Convenience function.
     ValueT get_or_return_default(const KeyT& key) const
     {
-        const auto bucket = find_filled_bucket(key);
+        const auto bucket = find_filled_key(key);
         return bucket == _num_buckets ? ValueT() : EMH_VAL(_pairs, bucket);
     }
 #endif
@@ -1047,18 +1074,18 @@ public:
         return bucket;
     }
 
-    inline size_type insert_unique(value_type&& value) noexcept
+    size_type insert_unique(value_type&& value) noexcept
     {
         return insert_unique(std::move(value.first), std::move(value.second));
     }
 
-    inline size_type insert_unique(const value_type& value)
+    size_type insert_unique(const value_type& value)
     {
         return insert_unique(value.first, value.second);
     }
 
     template <class... Args>
-    inline size_type emplace_unique(Args&&... args) noexcept
+    size_type emplace_unique(Args&&... args) noexcept
     {
         return insert_unique(std::forward<Args>(args)...);
     }
@@ -1083,6 +1110,7 @@ public:
         return do_insert(std::move(value)).first;
     }
 
+#if 0
     //TODO: fix tuple
     template<class... Args>
     std::pair<iterator, bool> try_emplace(const KeyT& key, Args&&... args)
@@ -1107,6 +1135,7 @@ public:
         }
         return { {this, bucket}, bempty };
     }
+#endif
 
     template<class... Args>
     iterator try_emplace(const_iterator hint, const KeyT& key, Args&&... args)
@@ -1203,7 +1232,7 @@ public:
     size_type erase(K&& key)
     {
         const auto bucket = erase_key(key);
-        if ((int)bucket < 0)
+        if ((size_type)bucket < 0)
             return 0;
 
         clear_bucket(bucket);
@@ -1223,12 +1252,6 @@ public:
     }
 
     void _erase(const_iterator it) noexcept
-    {
-        const auto bucket = erase_bucket(it._bucket);
-        clear_bucket(bucket);
-    }
-
-    void _erase(iterator it) noexcept
     {
         const auto bucket = erase_bucket(it._bucket);
         clear_bucket(bucket);
@@ -1297,7 +1320,7 @@ public:
         if (is_triviall_destructable())
             clearkv();
         else if (_num_filled)
-            memset((char*)_pairs, INACTIVE, sizeof(_pairs[0]) * _num_buckets);
+            memset((char*)_pairs, (int)INACTIVE, sizeof(_pairs[0]) * _num_buckets);
 #endif
 #if EMH_FIND_HIT
         if constexpr (std::is_integral<KeyT>::value)
@@ -1305,10 +1328,15 @@ public:
 #endif
 
         _last = _num_filled = 0;
+        _first = _num_buckets;
     }
 
     void shrink_to_fit(const float min_factor = EMH_DEFAULT_LOAD_FACTOR / 4)
     {
+#if EMH_SMALL_SIZE
+        if (_pairs == (PairT*)_small)
+            return;
+#endif
         if (load_factor() < min_factor) //safe guard
             rehash(_num_filled + 1);
     }
@@ -1317,17 +1345,12 @@ public:
     bool reserve(uint64_t num_elems)
     {
 #if EMH_HIGH_LOAD < 1000
-#if EMH_PACK_TAIL
-        const auto required_buckets = 1 + (size_type)(num_elems * _mlf >> 27);
-        if (EMH_LIKELY(required_buckets < _num_buckets))
-#else
-        const auto required_buckets = (size_type)(num_elems * _mlf >> 27);
-        if (EMH_LIKELY(required_buckets < _mask))
-#endif
+        const auto required_buckets = (num_elems * _mlf >> 27);
+        if (EMH_LIKELY(required_buckets < (uint64_t)_mask))
             return false;
 #else
-        const auto required_buckets = (size_type)(num_elems + num_elems * 1 / 9);
-        if (EMH_LIKELY(required_buckets < _mask))
+        const auto required_buckets = (num_elems + num_elems * 1 / 9);
+        if (EMH_LIKELY(required_buckets < (uint64_t)_mask))
             return false;
 
         else if (_num_buckets < 16 && _num_filled < _num_buckets)
@@ -1354,22 +1377,20 @@ public:
 
     void rehash(uint64_t required_buckets)
     {
-        if (required_buckets < _num_filled)
+        if (required_buckets < (uint64_t)_num_filled)
             return;
 
 #if EMH_SMALL_SIZE
-        uint64_t buckets = _num_filled > (1u << 16) ? (1u << 16) : EMH_SMALL_SIZE;
-        static_assert(EMH_SMALL_SIZE >= 2 && EMH_SMALL_SIZE < 1024);
-        static_assert((EMH_SMALL_SIZE & (EMH_SMALL_SIZE - 1)) == 0);
-#else
-        uint64_t buckets = _num_filled > (1u << 16) ? (1u << 16) : 2;
+        static_assert(EMH_SMALL_SIZE >= 2);
 #endif
+        uint64_t buckets = _num_filled > (size_type)(1u << 16) ? (1u << 16) : 2;
+
         while (buckets < required_buckets) { buckets *= 2; }
 
         // no need alloc too many bucket for small key.
         // if maybe fail set small load_factor and then call reserve() TODO:
-        if (sizeof(KeyT) < sizeof(size_type) && buckets >= (1ul << (2 * 8)))
-            buckets = 2ul << (sizeof(KeyT) * 8);
+        //if (sizeof(KeyT) < sizeof(size_type) && buckets >= (1ul << (2 * 8)))
+        //    buckets = 2ul << (sizeof(KeyT) * 8);
 
         assert(buckets < max_size() && buckets > _num_filled);
 
@@ -1390,9 +1411,10 @@ public:
         _num_filled  = 0;
         _mask        = num_buckets - 1;
         _last        = num_buckets / 4;
+        _first       = 0;
 
 #if EMH_PACK_TAIL > 1 && EMH_PACK_TAIL <= 100
-        _last = num_buckets;
+        _last = _mask;
         num_buckets += num_buckets * EMH_PACK_TAIL / 100; //add more 5-10%
 #endif
         _num_buckets = num_buckets;
@@ -1403,7 +1425,7 @@ public:
         else
 #endif
         _pairs = (PairT*)alloc_bucket(num_buckets);
-        memset((char*)_pairs, INACTIVE, sizeof(_pairs[0]) * num_buckets);
+        memset((char*)_pairs, (int)INACTIVE, sizeof(_pairs[0]) * num_buckets);
         memset((char*)(_pairs + num_buckets), 0, sizeof(PairT) * 2);
 
 #if EMH_FIND_HIT
@@ -1426,7 +1448,7 @@ public:
                 auto bucket = move_unique_bucket(src_bucket, nbucket);
                 _pairs[bucket] = std::move(_pairs[src_bucket]);
                 erase_bucket(src_bucket);
-                if ((int)EMH_BUCKET(_pairs, src_bucket) >= 0)
+                if ((size_type)EMH_BUCKET(_pairs, src_bucket) >= 0)
                     src_bucket --;
 
                 EMH_BUCKET(_pairs, bucket) = bucket;
@@ -1481,7 +1503,11 @@ private:
     static PairT* alloc_bucket(size_type num_buckets)
     {
         //TODO: call realloc
+#ifdef EMH_ALLOC
+        auto* new_pairs = (PairT*)aligned_alloc(EMH_MALIGN, (2 + num_buckets) * sizeof(PairT));
+#else
         auto* new_pairs = (PairT*)malloc((2 + num_buckets) * sizeof(PairT));
+#endif
         return new_pairs;
     }
 
@@ -1521,7 +1547,7 @@ private:
     size_type pop_empty(const size_type bucket)
     {
         const auto prev_bucket = EMH_PREVET(_pairs, bucket);
-        int next_bucket = (int)(0-EMH_BUCKET(_pairs, bucket));
+        const auto next_bucket = (size_type)(0-EMH_BUCKET(_pairs, bucket));
 //        assert(next_bucket > 0 && _ehead > 0);
 //        assert(next_bucket <= _mask && prev_bucket <= _mask);
 
@@ -1561,7 +1587,7 @@ private:
         }
         EMH_BUCKET(_pairs, bucket) = INACTIVE; //the status is reset by destructor by some compiler
         _num_filled--;
-
+        (void)bclear;
 #if EMH_HIGH_LOAD
         if (_ehead && bclear) {
             if (10 * _num_filled < 8 * _num_buckets)
@@ -1580,7 +1606,7 @@ private:
     {
         const auto bucket = key_to_bucket(key);
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if (EMH_UNLIKELY((int)next_bucket < 0))
+        if (EMH_UNLIKELY((size_type)next_bucket < 0))
             return INACTIVE;
 
         const auto equalk = _eq(key, EMH_KEY(_pairs, bucket));
@@ -1672,20 +1698,20 @@ private:
     }
 
     template<typename K=KeyT>
-    inline size_type find_filled_bucket(const K& key) const noexcept
+    size_type find_filled_key(const K& key) const noexcept
     {
-        return find_hash_bucket(key, hash_key(key));
+        const auto main_bucket = key_to_bucket(key);
+        return find_hash_bucket(key, main_bucket);
     }
 
     // Find the bucket with this key, or return bucket size
     template<typename K=KeyT>
-    size_type find_hash_bucket(const K& key, size_type key_hash) const noexcept
+    size_type find_hash_bucket(const K& key, size_type bucket) const noexcept
     {
-        const auto bucket = key_hash & _mask;
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
 
 #if EMH_FIND_HIT == 0
-        if ((int)next_bucket < 0)
+        if ((size_type)next_bucket < 0)
             return _num_buckets;
         else if (_eq(key, EMH_KEY(_pairs, bucket)))
             return bucket;
@@ -1693,10 +1719,10 @@ private:
         if constexpr (std::is_integral<KeyT>::value) {
             if (_eq(key, EMH_KEY(_pairs, bucket)))
                 return bucket;
-            else if ((int)next_bucket < 0)
+            else if ((size_type)next_bucket < 0)
                 return _num_buckets;
         } else {
-            if ((int)next_bucket < 0)
+            if ((size_type)next_bucket < 0)
                 return _num_buckets;
             else if (_eq(key, EMH_KEY(_pairs, bucket)))
                 return bucket;
@@ -1723,8 +1749,8 @@ private:
 
     //kick out bucket and find empty to occpuy
     //it will break the orgin link and relnik again.
-    //before: main_bucket-->prev_bucket --> bucket   --> next_bucket
-    //atfer : main_bucket-->prev_bucket --> (removed)--> new_bucket--> next_bucket
+    //before: main_bucket-->prev_bucket --> kbucket   --> next_bucket
+    //after : main_bucket-->prev_bucket --> (removed)--> new_bucket(kbucket)--> next_bucket
     size_type kickout_bucket(const size_type kmain, const size_type kbucket) noexcept
     {
         const auto next_bucket = EMH_BUCKET(_pairs, kbucket);
@@ -1732,6 +1758,7 @@ private:
         const auto prev_bucket = find_prev_bucket(kmain, kbucket);
         EMH_BUCKET(_pairs, prev_bucket) = new_bucket;
         new(_pairs + new_bucket) PairT(std::move(_pairs[kbucket]));
+        if (new_bucket < _first) _first = new_bucket;
         if (next_bucket == kbucket)
             EMH_BUCKET(_pairs, new_bucket) = new_bucket;
 
@@ -1753,7 +1780,7 @@ private:
         const auto bucket = key_to_bucket(key);
         const auto& bucket_key = EMH_KEY(_pairs, bucket);
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if ((int)next_bucket < 0) {
+        if ((size_type)next_bucket < 0) {
 #if EMH_HIGH_LOAD
             if (next_bucket != INACTIVE)
                 pop_empty(bucket);
@@ -1769,7 +1796,7 @@ private:
         else if (next_bucket == bucket)
             return EMH_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket, 1);
 
-        int csize = 0;
+        uint32_t csize = 0;
 #if EMH_LRU_SET
         auto prev_bucket = bucket;
 #endif
@@ -1805,7 +1832,7 @@ private:
     {
         const auto bucket = key_to_bucket(key);
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if ((int)next_bucket < 0) {
+        if ((size_type)next_bucket < 0) {
 #if EMH_HIGH_LOAD
             if (next_bucket != INACTIVE)
                 pop_empty(bucket);
@@ -1821,14 +1848,14 @@ private:
             next_bucket = find_last_bucket(next_bucket);
 
         //find a new empty and link it to tail
-        return EMH_BUCKET(_pairs, next_bucket) = find_unique_empty(next_bucket);
+        return EMH_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket, 2);
     }
 
     size_type move_unique_bucket(size_type old_bucket, size_type bucket) noexcept
     {
         (void)old_bucket;
         auto next_bucket = EMH_BUCKET(_pairs, bucket);
-        if ((int)next_bucket < 0)
+        if ((size_type)next_bucket < 0)
             return bucket;
 
         next_bucket = find_last_bucket(next_bucket);
@@ -1865,30 +1892,37 @@ one-way search strategy.
 #ifndef _MSC_VER
         //__builtin_prefetch(static_cast<const void*>(_pairs + bucket + 1), 0, 1);
 #endif
-        constexpr auto linear_probe_length = 5;//2-3 cache line miss
+        constexpr auto linear_probe_length = 6;//2-3 cache line miss
         for (size_type step = 2, slot = bucket + 1 + csize / 2; ; slot += step++) {
             if (step < linear_probe_length) {
                 auto bucket1 = slot & _mask;
-                if (EMH_EMPTY(_pairs, bucket1) || EMH_EMPTY(_pairs, ++bucket1))
+                if (EMH_EMPTY(_pairs, bucket1))
                     return bucket1;
-            } else { //if (step++ > 5) {
-                if (EMH_EMPTY(_pairs, ++_last))// || EMH_EMPTY(_pairs, _last++))
-                    return _last;
 
-                _last &= _mask;
+                bucket1 += 1 + (step % 2);
+                if (EMH_EMPTY(_pairs, bucket1))
+                    return bucket1;
+            } else {
 #if EMH_PACK_TAIL
-                auto tail = _num_buckets - _last;
-                if (EMH_EMPTY(_pairs, tail) || EMH_EMPTY(_pairs, ++tail))
-                    return tail;
+                if (EMH_EMPTY(_pairs, _last++))
+                    return _last++ - 1;
+
+                if (EMH_UNLIKELY(_last >= _num_buckets))
+                    _last = 0;
+
+                auto medium = (_mask / 4 + _last) & _mask;
+                if (EMH_EMPTY(_pairs, medium))
+                    return medium;
 #else
+                if (EMH_EMPTY(_pairs, ++_last))
+                    return _last++;
+                _last &= _mask;
                 auto medium = (_num_buckets / 2 + _last) & _mask;
                 if (EMH_EMPTY(_pairs, medium))// && EMH_EMPTY(_pairs, ++medium))
                     return _last = medium;
 #endif
             }
         }
-
-        return 0;
     }
 
     size_type find_unique_empty(const size_type bucket_from) noexcept
@@ -1902,8 +1936,6 @@ one-way search strategy.
             if (EMH_EMPTY(_pairs, nbucket) || EMH_EMPTY(_pairs, ++nbucket))
                 return nbucket;
         }
-
-        return 0;
     }
 
     size_type find_last_bucket(size_type main_bucket) const noexcept
@@ -1935,19 +1967,19 @@ one-way search strategy.
     }
 
     template<typename K=KeyT>
-    inline size_type key_to_bucket(const K& key) const noexcept
+    size_type key_to_bucket(const K& key) const noexcept
     {
         return (size_type)hash_key(key) & _mask;
     }
 
-    inline size_type hash_main(const size_type bucket) const noexcept
+    size_type hash_main(const size_type bucket) const noexcept
     {
         return (size_type)hash_key(EMH_KEY(_pairs, bucket)) & _mask;
     }
 
 #if EMH_INT_HASH
     static constexpr uint64_t KC = UINT64_C(11400714819323198485);
-    inline uint64_t hash64(uint64_t key)
+    static uint64_t hash64(uint64_t key)
     {
 #if __SIZEOF_INT128__ && EMH_INT_HASH == 1
         __uint128_t r = key; r *= KC;
@@ -1986,7 +2018,7 @@ one-way search strategy.
 #endif
 
     template<typename UType, typename std::enable_if<std::is_integral<UType>::value, size_type>::type = 0>
-    inline size_type hash_key(const UType key) const
+    size_type hash_key(const UType key) const
     {
 #if EMH_INT_HASH
         return hash64(key);
@@ -1998,7 +2030,7 @@ one-way search strategy.
     }
 
     template<typename UType, typename std::enable_if<std::is_same<UType, std::string>::value, size_type>::type = 0>
-    inline size_type hash_key(const UType& key) const
+    size_type hash_key(const UType& key) const
     {
 #if EMH_WY_HASH
         return (size_type)wyhash(key.data(), key.size(), 0);
@@ -2008,7 +2040,7 @@ one-way search strategy.
     }
 
     template<typename UType, typename std::enable_if<!std::is_integral<UType>::value && !std::is_same<UType, std::string>::value, size_type>::type = 0>
-    inline size_type hash_key(const UType& key) const
+    size_type hash_key(const UType& key) const
     {
         return (size_type)_hasher(key);
     }
@@ -2026,6 +2058,7 @@ private:
     size_type _num_buckets;
     size_type _num_filled;
     size_type _last;
+    size_type _first;
 #if EMH_HIGH_LOAD
     size_type _ehead;
 #endif

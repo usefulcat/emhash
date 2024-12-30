@@ -10,9 +10,12 @@
 //#include <ext/pb_ds/assoc_container.hpp>
 #endif
 
+#if HAVE_BOOST
+#include <boost/unordered/unordered_flat_map.hpp>
+#endif
 //#define EMH_INT_HASH 1
 
-#include "martinus/robin_hood.h"
+#include "martin/robin_hood.h"
 #include "phmap/phmap.h"
 #include "ska/flat_hash_map.hpp"
 #include "ska/bytell_hash_map.hpp"
@@ -21,8 +24,8 @@
 
 //#include "patchmap/patchmap.hpp"
 //#include "emilib/emilib33.hpp"
-#include "emilib/emilib.hpp"
-#include "emilib/emilib2.hpp"
+#include "emilib/emilib2ss.hpp"
+#include "emilib/emilib2o.hpp"
 #include "emilib/emilib2s.hpp"
 
 #include "hash_table8.hpp"
@@ -189,7 +192,7 @@ rnd_above_perc(int r) {
 static void
 init_keys(std::vector<test_key_t> & insert_keys) {
     insert_keys.clear();
-    for (uint32_t i = 0; i < TEST_LEN; i++) {
+    for (uint32_t i = 0; i < (uint32_t)TEST_LEN; i++) {
         // duplicates here mean nothing...
         insert_keys.push_back(gen_key());
     }
@@ -278,7 +281,7 @@ static int run_table(std::vector<test_key_t> & insert_keys,
     auto start_time = now2ns();
     auto sum = 0;
     auto dvalue = gen_val();
-    for (uint32_t i = 0; i < TEST_LEN; i++) {
+    for (uint32_t i = 0; i < (uint32_t)TEST_LEN; i++) {
         test_table[insert_keys[i]] = dvalue;
         for (uint32_t j = i * QUERY_RATE; j < (i + 1) * QUERY_RATE; j++) {
             sum += test_table.count(query_keys[j]);
@@ -474,6 +477,10 @@ int main(int argc, char* argv[])
         run_udb2<emilib::HashMap<uint32_t, uint32_t, Hash32>>("emilib");
         run_udb2<emilib2::HashMap<uint32_t, uint32_t, Hash32>>("emilib2");
         run_udb2<emilib3::HashMap<uint32_t, uint32_t, Hash32>>("emilib3");
+#if HAVE_BOOST
+        run_udb2<boost::unordered_flat_map<uint32_t, uint32_t, Hash32>>("boost");
+#endif
+
 #if ABSL_HMAP
         run_udb2<absl::flat_hash_map<uint32_t, uint32_t, Hash32>>("absl");
 #endif
@@ -551,6 +558,11 @@ int main(int argc, char* argv[])
     run_table <emilib::HashMap<test_key_t, test_val_t, hash_t>>     (insert_keys, insert_vals, query_keys, remove_keys);
     run_table <emilib2::HashMap<test_key_t, test_val_t, hash_t>>     (insert_keys, insert_vals, query_keys, remove_keys);
     run_table <emilib3::HashMap<test_key_t, test_val_t, hash_t>>     (insert_keys, insert_vals, query_keys, remove_keys);
+
+#if HAVE_BOOST
+    run_table <boost::unordered_flat_map<test_key_t, test_val_t, hash_t>>     (insert_keys, insert_vals, query_keys, remove_keys);
+#endif
+
     run_table <emhash6::HashMap<test_key_t, test_val_t, hash_t>>(insert_keys, insert_vals, query_keys, remove_keys);
     run_table <emhash7::HashMap<test_key_t, test_val_t, hash_t>>(insert_keys, insert_vals, query_keys, remove_keys);
     run_table <robin_hood::unordered_flat_map<test_key_t, test_val_t, hash_t>>(insert_keys, insert_vals, query_keys, remove_keys);

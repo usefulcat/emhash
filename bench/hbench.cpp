@@ -1,14 +1,13 @@
 #include "util.h"
 
-#include "martinus/robin_hood.h"
+#include "martin/robin_hood.h"
 #include "tsl/robin_map.h"
 #include "tsl/hopscotch_map.h"
 #include "ska/flat_hash_map.hpp"
 #include "ska/bytell_hash_map.hpp"
 #include "phmap/phmap.h"
-//#include "emilib/emilib33.hpp"
-#include "emilib/emilib.hpp"
-#include "emilib/emilib2.hpp"
+#include "emilib/emilib2ss.hpp"
+#include "emilib/emilib2o.hpp"
 //#include "patchmap/patchmap.hpp"
 
 
@@ -16,6 +15,10 @@
 #include "hash_table7.hpp"
 #include "hash_table5.hpp"
 //#include "old/hash_table2.hpp"
+
+#if HAVE_BOOST
+#include <boost/unordered/unordered_flat_map.hpp>
+#endif
 
 #ifdef _WIN32
 class Timer
@@ -35,11 +38,11 @@ private:
 class Timer
 {
 public:
-    Timer(const char* msg, const char* msg2) :_msg(msg) { clock_gettime(CLOCK_MONOTONIC_RAW, &_start); }
+    Timer(const char* msg, const char* msg2) :_msg(msg) { clock_gettime(CLOCK_MONOTONIC, &_start); }
     ~Timer()
     {
         struct timespec end;
-        clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+        clock_gettime(CLOCK_MONOTONIC, &end);
 
         //milliseconds
         double msec = double((end.tv_sec - _start.tv_sec) * 1000ULL) + double(end.tv_nsec - _start.tv_nsec)*0.000001;
@@ -77,7 +80,7 @@ static inline Value make_value(uint64_t v, const Value*) {
 }
 
 template<class T>
-static void iterator(T& m, const char* msg = nullptr) 
+static void iterator(T& m, const char* msg = nullptr)
 {
     Timer t("iterator", msg);
     for (int n = LOOPS; n--;) {
@@ -370,6 +373,9 @@ int main()
     { robin_hood::unordered_flat_map<uint64_t, Value, hash_t> m4; ret -= test(m4, "\nrobin_hood::unordered_flat_map"); }
     { emilib::HashMap<uint64_t, Value, hash_t> m8; ret -= test(m8, "\nemilib::HashMap"); }
     { emilib2::HashMap<uint64_t, Value, hash_t> m8; ret -= test(m8, "\nemilib2::HashMap"); }
+#if HAVE_BOOST
+    { boost::unordered_flat_map<uint64_t, Value, hash_t> m8; ret -= test(m8, "\nboost::unordered_flat_map"); }
+#endif
     { robin_hood::unordered_node_map<uint64_t, Value, hash_t> m4; ret -= test(m4, "\nrobin_hood::unordered_node_map"); }
 //    { emhash4::HashMap<uint64_t, Value, hash_t> m7; ret -= test(m7, "\nemhash4::HashMap"); }
 //    { emilib3::HashMap<uint64_t, Value, hash_t> m8; ret -= test(m8, "\nemilib3::HashMap"); }

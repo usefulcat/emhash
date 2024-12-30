@@ -51,17 +51,17 @@ using value_type = uint64_t;
 #elif EMH == 7
 #include "hash_table7.hpp"
 #elif MARTIN
-#include "martinus/robin_hood.h"
+#include "martin/robin_hood.h"
 #elif PHMAP
 #include "phmap/phmap.h"
 #elif TSL
 #include "tsl/robin_map.h"
 #endif
 
-#if ABSL
+#if ABSL_HMAP
   #include "absl/container/flat_hash_map.h"
   #include "absl/container/internal/raw_hash_set.cc"
-#if ABSL_HMAP
+#if ABSL_HASH
   #include "absl/hash/internal/city.cc"
   #include "absl/hash/internal/hash.cc"
 #endif

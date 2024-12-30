@@ -10,6 +10,7 @@
 #include <iostream>
 #include <string>
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <bitset>
 #include <fstream>
@@ -27,7 +28,7 @@
     #define NOMINMAX
     #endif
     # include <windows.h>
-
+    # pragma warning(disable : 4996)
 #else
     # include <unistd.h>
     # include <sys/resource.h>
@@ -53,18 +54,22 @@
     #define X86 1
     #define X86_64 1
     #define PHMAP_HAVE_SSSE3                      1
-    #define PHMAP_NON_DETERMINISTIC               1
+    #define PHMAP_HAVE_SSE2                       1
+//    #define PHMAP_NON_DETERMINISTIC               1
 #endif
 #if  _M_IX86 || __i386__
     #define X86 1
     #define X86_32 1
     #define PHMAP_HAVE_SSSE3                      1
-    #define PHMAP_NON_DETERMINISTIC               1
+    #define PHMAP_HAVE_SSE2                       1
+//    #define PHMAP_NON_DETERMINISTIC               1
 #endif
 
-#if X86
+#if A_HASH
 #include "ahash/ahash.c"
 #include "ahash/random_state.c"
+#include "ahash-cxx/hasher.h"
+#include "ahash-cxx/ahash-cxx.h"
 #endif
 
 #if _WIN32 && _WIN64 == 0
@@ -101,28 +106,31 @@ int64_t getus()
     auto tp = std::chrono::high_resolution_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::microseconds>(tp).count();
 #elif WIN32_RUS
-    FILETIME ptime[4];
+    FILETIME ptime[4] = {0, 0, 0, 0, 0, 0, 0, 0};
     GetThreadTimes(GetCurrentThread(), &ptime[0], &ptime[2], &ptime[2], &ptime[3]);
     return (ptime[2].dwLowDateTime + ptime[3].dwLowDateTime) / 10;
 #elif WIN32_TICK
     return GetTickCount() * 1000;
-#elif WIN32_HTIME || _WIN32
+#elif WIN32_HTIME || _WIN320
     LARGE_INTEGER freq;
     QueryPerformanceFrequency(&freq);
 
     LARGE_INTEGER nowus;
     QueryPerformanceCounter(&nowus);
     return (nowus.QuadPart * 1000000) / (freq.QuadPart);
-#elif WIN32_STIME
-    FILETIME    file_time;
-    SYSTEMTIME  system_time;
-    ULARGE_INTEGER ularge;
+#elif _WIN32
+    FILETIME ft;
+#if _WIN32_WINNT >= 0x0602
+    GetSystemTimePreciseAsFileTime(&ft);
+#else
+    GetSystemTimeAsFileTime(&ft);
+#endif  /* Windows 8  */
 
-    GetSystemTime(&system_time);
-    SystemTimeToFileTime(&system_time, &file_time);
-    ularge.LowPart  = file_time.dwLowDateTime;
-    ularge.HighPart = file_time.dwHighDateTime;
-    return ularge.QuadPart / 10 + system_time.wMilliseconds / 1000;
+    int64_t t1 = (int64_t)ft.dwHighDateTime << 32 | ft.dwLowDateTime;
+    /* Convert to UNIX epoch, 1970-01-01. Still in 100 ns increments. */
+    t1 -= 116444736000000000ull;
+    t1 = t1 / 10;
+    return t1;
 #elif LINUX_RUS
     struct rusage rup;
     getrusage(RUSAGE_SELF, &rup);
@@ -132,7 +140,7 @@ int64_t getus()
 //#elif LINUX_TICK || __APPLE__
 //    return clock();
 #elif __linux__
-    struct timespec ts;
+    struct timespec ts = {0, 0};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000000ull + ts.tv_nsec / 1000;
 #elif __unix__
@@ -162,59 +170,72 @@ static inline uint64_t randomseed() {
     return g();
 }
 
-#ifndef _MSC_VER
+#if __SIZEOF_INT128__
 class Lehmer64 {
-    __uint128_t g_lehmer64_state;
+public:
+    __uint128_t g_lehmer64_state = 1;
+    uint64_t splitmix64_x; /* The state can be seeded wit// original documentation by Vigna:
+    This is a fixed-increment version of Java 8's SplittableRandom generator
+    See http://dx.doi.org/10.1145/2714064.2660195 and
+http://docs.oracle.com/javase/8/docs/api/java/util/SplittableRandom.html
 
-    uint64_t splitmix64_x; /* The state can be seeded with any value. */
+It is a very fast generator passing BigCrush, and it can be useful if
+for some reason you absolutely want 64 bits of state; otherwise, we
+rather suggest to use a xoroshiro128+ (for moderately parallel
+computations) or xorshift1024* (for massively parallel computations)
+generator. */
 
-    public:
+    Lehmer64(uint64_t seed) {
+        splitmix64_seed(seed);
+        g_lehmer64_state = (((__uint128_t)splitmix64_stateless(seed, 0)) << 64) + splitmix64_stateless(seed, 1);
+    }
+
+private:
     // call this one before calling splitmix64
-    Lehmer64(uint64_t seed) { splitmix64_x = seed; }
+    inline void splitmix64_seed(uint64_t seed) { splitmix64_x = seed; }
 
-    // returns random number, modifies splitmix64_x
+    // floor( ( (1+sqrt(5))/2 ) * 2**64 MOD 2**64)
+#define GOLDEN_GAMMA UINT64_C(0x9E3779B97F4A7C15)
+
+    // returns random number, modifies seed[0]
     // compared with D. Lemire against
     // http://grepcode.com/file/repository.grepcode.com/java/root/jdk/openjdk/8-b132/java/util/SplittableRandom.java#SplittableRandom.0gamma
-    inline uint64_t splitmix64(void) {
-        uint64_t z = (splitmix64_x += UINT64_C(0x9E3779B97F4A7C15));
+    inline uint64_t splitmix64_r(uint64_t *seed) {
+        uint64_t z = (*seed += GOLDEN_GAMMA);
+        // David Stafford's Mix13 for MurmurHash3's 64-bit finalizer
         z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
         z = (z ^ (z >> 27)) * UINT64_C(0x94D049BB133111EB);
         return z ^ (z >> 31);
     }
 
+    // returns random number, modifies splitmix64_x
+   inline uint64_t splitmix64(void) {
+        return splitmix64_r(&splitmix64_x);
+    }
+
     // returns the 32 least significant bits of a call to splitmix64
-    // this is a simple function call followed by a cast
+    // this is a simple (inlined) function call followed by a cast
     inline uint32_t splitmix64_cast32(void) {
         return (uint32_t)splitmix64();
     }
 
-    // same as splitmix64, but does not change the state, designed by D. Lemire
-    inline uint64_t splitmix64_stateless(uint64_t index) {
-        uint64_t z = (index + UINT64_C(0x9E3779B97F4A7C15));
-        z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)) * UINT64_C(0x94D049BB133111EB);
-        return z ^ (z >> 31);
-    }
+    // returns the value of splitmix64 "offset" steps from seed
+    inline uint64_t splitmix64_stateless(uint64_t seed, uint64_t offset) {
+        seed += offset*GOLDEN_GAMMA;
+        return splitmix64_r(&seed);
+    }/*h any value. */
 
-    inline void lehmer64_seed(uint64_t seed) {
-        g_lehmer64_state = (((__uint128_t)splitmix64_stateless(seed)) << 64) +
-            splitmix64_stateless(seed + 1);
-    }
-
+public:
     inline uint64_t operator()() {
         g_lehmer64_state *= UINT64_C(0xda942042e4dd58b5);
         return g_lehmer64_state >> 64;
     }
-        // this is a bit biased, but for our use case that's not important.
+
+    // this is a bit biased, but for our use case that's not important.
     uint64_t operator()(uint64_t boundExcluded) noexcept {
-#ifdef __SIZEOF_INT128__
-        return static_cast<uint64_t>((static_cast<unsigned __int128>(operator()()) * static_cast<unsigned __int128>(boundExcluded)) >> 64u);
-#elif _WIN32
-        uint64_t high;
-        uint64_t a = operator()();
-        _umul128(a, boundExcluded, &high);
-        return high;
-#endif
+	(void) boundExcluded;
+        g_lehmer64_state *= UINT64_C(0xda942042e4dd58b5);
+        return g_lehmer64_state >> 64;
     }
 };
 #endif
@@ -370,15 +391,14 @@ private:
     uint64_t mCounter;
 };
 
-
 static inline uint64_t hashfib(uint64_t key)
 {
 #if __SIZEOF_INT128__
     __uint128_t r =  (__int128)key * UINT64_C(11400714819323198485);
-    return (uint64_t)(r >> 64) + (uint64_t)r;
+    return (uint64_t)(r >> 64) ^ (uint64_t)r;
 #elif _WIN64
     uint64_t high;
-    return _umul128(key, UINT64_C(11400714819323198485), &high) + high;
+    return _umul128(key, UINT64_C(11400714819323198485), &high) ^ high;
 #else
     uint64_t r = key * UINT64_C(0xca4bcaa75ec3f625);
     return (r >> 32) + r;
@@ -391,7 +411,7 @@ static inline uint64_t hashmix(uint64_t key)
     auto low  = key * 0xA24BAED4963EE407ull;
     auto high = ror * 0x9FB21C651E98DF25ull;
     auto mix  = low + high;
-    return mix;// (mix >> 32) | (mix << 32);
+    return (mix >> 32) | (mix << 32);
 }
 
 static inline uint64_t rrxmrrxmsx_0(uint64_t v)
@@ -416,6 +436,43 @@ static inline uint64_t hash_mur3(uint64_t key)
     return h;
 }
 
+static inline uint64_t squirrel3(uint64_t at)
+{
+    constexpr uint64_t BIT_NOISE1 = 0x9E3779B185EBCA87ULL;
+    constexpr uint64_t BIT_NOISE2 = 0xC2B2AE3D27D4EB4FULL;
+    constexpr uint64_t BIT_NOISE3 = 0x27D4EB2F165667C5ULL;
+    at *= BIT_NOISE1; at ^= (at >> 8);
+    at += BIT_NOISE2; at ^= (at << 8);
+    at *= BIT_NOISE3; at ^= (at >> 8);
+    return at;
+}
+
+static inline uint64_t udb_splitmix64(uint64_t x)
+{
+    uint64_t z = x += 0x9e3779b97f4a7c15ULL;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+#if __SSE4_2__ || _WIN32
+#include <nmmintrin.h>
+#elif defined(__aarch64__)
+#include <arm_acle.h>
+#include <arm_neon.h>
+#endif
+
+static inline uint64_t intHashCRC32(uint64_t x)
+{
+#if __SSE4_2__ || _WIN32
+    return _mm_crc32_u64(-1ULL, x);
+#elif defined(__aarch64__)
+    return __crc32cd(-1U, x);
+#else
+    return x;
+#endif
+}
+
 template<typename T>
 struct Int64Hasher
 {
@@ -432,13 +489,19 @@ struct Int64Hasher
         return hashmix(key);
 #elif FIB_HASH == 5
         return rrxmrrxmsx_0(key);
+#elif FIB_HASH == 6
+        return squirrel3(key);
+#elif FIB_HASH == 7
+        return intHashCRC32(key);
+#elif FIB_HASH == 9
+        return udb_splitmix64(key);
 #elif FIB_HASH > 10000
         return key % FIB_HASH; //bad hash
 #elif FIB_HASH > 100
         return key * FIB_HASH; //bad hash
-#elif FIB_HASH == 6
+#elif FIB_HASH == 8
         return wyhash64(key, KC);
-#else
+#else //staffort_mix13
         auto x = key;
         x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
         x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
@@ -465,12 +528,23 @@ void shuffle(RandomIt first, RandomIt last)
     }
 }
 
-#if AHASH_AHASH_H
+#if A_HASH
 struct Ahash64er
 {
     std::size_t operator()(const std::string& str) const
     {
         return ahash64(str.data(), str.size(), str.size());
+    }
+};
+
+template<typename T>
+struct Axxhasher
+{
+    std::size_t operator()(const T& str) const
+    {
+        ahash::Hasher hasher{1};
+        hasher.consume(str.data(), str.size());
+        return hasher.finalize();
     }
 };
 #endif
@@ -539,13 +613,12 @@ struct WyRand
         return high;
 #endif
     }
-
 };
 #endif
 
 static void cpuidInfo(int regs[4], int id, int ext)
 {
-#if X86_64
+#if X86
 #if _MSC_VER >= 1600 //2010
     __cpuidex(regs, id, ext);
 #elif __GNUC__
@@ -573,78 +646,79 @@ static void cpuidInfo(int regs[4], int id, int ext)
 static void printInfo(char* out)
 {
     const char* sepator =
-        "------------------------------------------------------------------------------------------------------------";
+        "-----------------------------------------------------------------------------------------------------------------";
 
     puts(sepator);
     //    puts("Copyright (C) by 2019-2022 Huang Yuanbing bailuzhou at 163.com\n");
 
-    char cbuff[512] = {0};
+    char cbuff[1512] = {0};
     char* info = cbuff;
 #ifdef __clang__
-    info += sprintf(info, "clang %s", __clang_version__); //vc/gcc/llvm
+    info += snprintf(info, 20,  "clang %s", __clang_version__); //vc/gcc/llvm
 #if __llvm__
-    info += sprintf(info, " on llvm/");
+    info += snprintf(info, 20,  " on llvm/");
 #endif
 #endif
 
 #if _MSC_VER
-    info += sprintf(info, "ms vc++  %d", _MSC_VER);
+    info += snprintf(info, 20,  "ms vc++ %d", _MSC_VER);
 #elif __GNUC__
-    info += sprintf(info, "gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+    info += snprintf(info, 20,  "gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
 #elif __INTEL_COMPILER
-    info += sprintf(info, "intel c++ %d", __INTEL_COMPILER);
+    info += snprintf(info, 20,  "intel c++ %d", __INTEL_COMPILER);
 #endif
 
 #if __cplusplus > 199711L
-    info += sprintf(info, " __cplusplus = %d", static_cast<int>(__cplusplus));
+    info += snprintf(info, 40,  " __cplusplus = %d", static_cast<int>(__cplusplus));
 #endif
 
 #if X86_64
-    info += sprintf(info, " x86-64");
+    info += snprintf(info, 20,  " x86-64");
 #elif X86_32
-    info += sprintf(info, " x86");
+    info += snprintf(info, 20,  " x86");
 #elif __arm64__ || __aarch64__
-    info += sprintf(info, " arm64");
+    info += snprintf(info, 20,  " arm64");
 #elif __arm__
-    info += sprintf(info, " arm");
+    info += snprintf(info, 20,  " arm");
 #else
-    info += sprintf(info, " unknow");
+    info += snprintf(info, 20,  " unknow");
 #endif
 
 #if _WIN32
-    info += sprintf(info, " OS = Win");
+    info += snprintf(info, 20,  " OS = Win");
 //    SetThreadAffinityMask(GetCurrentThread(), 0x1);
 #elif __linux__
-    info += sprintf(info, " OS = linux");
+    info += snprintf(info, 20,  " OS = linux");
 #elif __MAC__ || __APPLE__
-    info += sprintf(info, " OS = MAC");
+    info += snprintf(info, 20,  " OS = mac");
 #elif __unix__
-    info += sprintf(info, " OS = unix");
+    info += snprintf(info, 20,  " OS = unix");
 #else
-    info += sprintf(info, " OS = unknow");
+    info += snprintf(info, 20,  " OS = unknow");
 #endif
 
-    info += sprintf(info, ", cpu = ");
+#if X86
+    info += snprintf(info, 40,  ", cpu = ");
     char vendor[0x40] = {0};
     int (*pTmp)[4] = (int(*)[4])vendor;
     cpuidInfo(*pTmp ++, 0x80000002, 0);
     cpuidInfo(*pTmp ++, 0x80000003, 0);
     cpuidInfo(*pTmp ++, 0x80000004, 0);
 
-    info += sprintf(info, "%s", vendor);
+    info += snprintf(info, 40,  "%s", vendor);
+#endif
 
     puts(cbuff);
     if (out)
 #if _WIN32
-        strncpy_s(out, sizeof(cbuff), cbuff, sizeof(cbuff));
+        strncpy_s(out, sizeof(cbuff), cbuff, sizeof(cbuff) - 1);
 #else
-        strncpy(out, cbuff, sizeof(cbuff));
+        strncpy(out, cbuff, sizeof(cbuff) - 1);
 #endif
 
     puts(sepator);
 }
 
-#include <chrono>
 static const std::array<char, 62> ALPHANUMERIC_CHARS = {
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
@@ -690,21 +764,25 @@ static std::string_view get_random_alphanum_string_view(std::size_t size) {
 #define  ABSL_INTERNAL_RAW_HASH_SET_HAVE_SSSE3 1
 #define  ABSL_INTERNAL_RAW_HASH_SET_HAVE_SSSE2 1
 #endif
-#define ABSL 1
+
+#if ABSL_HMAP
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/internal/raw_hash_set.cc"
-
-#if ABSL_HASH
 #include "absl/hash/internal/low_level_hash.cc"
 #include "absl/hash/internal/hash.cc"
 #include "absl/hash/internal/city.cc"
+
+#if ABSL_HASH
+#include "absl/crc/internal/crc_x86_arm_combined.cc"
+#endif
 #endif
 
 #if __cplusplus > 201402L || CXX17 || _MSC_VER > 1730
 #define CXX17 1
 #include "fph/dynamic_fph_table.h" //https://github.com/renzibei/fph-table
-#include "fph/meta_fph_table.h" //https://github.com/renzibei/fph-table
+#include "fph/meta_fph_table.h"
+#include "jg/dense_hash_map.hpp" //https://github.com/Jiwan/dense_hash_map
 #endif
 
 #if __cplusplus > 201704L || CXX20 || _MSC_VER >= 1929
@@ -712,7 +790,6 @@ static std::string_view get_random_alphanum_string_view(std::size_t size) {
 #include "qchash/qc-hash.hpp" //https://github.com/daskie/qc-hash
 #endif
 #define CXX20 1
-#include "jg/dense_hash_map.hpp" //https://github.com/Jiwan/dense_hash_map
 #include "rigtorp/rigtorp.hpp"   //https://github.com/rigtorp/HashMap/blob/master/include/rigtorp/HashMap.h
 
 //#include "ck/Common/HashTable/HashMap.h"

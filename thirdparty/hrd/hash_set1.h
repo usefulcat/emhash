@@ -2,7 +2,7 @@
 
 // Fast hashtable (hash_set, hash_map) based on open addressing hashing for C++11 and up
 //
-// This version supports full size_t hashing (calculates hash of each elements after any reallocation/resize) 
+// This version supports full size_t hashing (calculates hash of each elements after any reallocation/resize)
 // version 1.3.2
 //
 // https://github.com/hordi/hash
@@ -701,7 +701,7 @@ protected:
 
         if (HRD_LIKELY(!!it._ptr)) //valid
         {
-            typename this_type::value_type data_type;
+            typedef typename this_type::value_type data_type;
 
             it._ptr->data.~data_type();
             _size--;
@@ -742,7 +742,7 @@ protected:
             {
                 if (HRD_LIKELY(ref(this_type::key_getter::get_key(r.data), k))) //identical found
                 {
-                    typename this_type::value_type data_type;
+                    typedef typename this_type::value_type data_type;
 
                     r.data.~data_type();
                     _size--;

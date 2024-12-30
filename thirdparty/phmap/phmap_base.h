@@ -18,7 +18,7 @@
 //
 // Includes work from abseil-cpp (https://github.com/abseil/abseil-cpp)
 // with modifications.
-// 
+//
 // Copyright 2018 The Abseil Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -223,6 +223,36 @@ struct disjunction<> : std::false_type {};
 template <typename T>
 struct negation : std::integral_constant<bool, !T::value> {};
 
+#if defined(__GNUC__) && __GNUC__ < 5 && !defined(__clang__) && !defined(_MSC_VER) && !defined(__INTEL_COMPILER)
+    #define PHMAP_OLD_GCC 1
+#else
+    #define PHMAP_OLD_GCC 0
+#endif
+
+#if PHMAP_OLD_GCC
+  template <typename T>
+  struct is_trivially_copy_constructible
+     : std::integral_constant<bool,
+                              __has_trivial_copy(typename std::remove_reference<T>::type) &&
+                              std::is_copy_constructible<T>::value &&
+                              std::is_trivially_destructible<T>::value> {};
+
+  template <typename T>
+  struct is_trivially_copy_assignable :
+     std::integral_constant<bool,
+                            __has_trivial_assign(typename std::remove_reference<T>::type) &&
+                            phmap::is_copy_assignable<T>::value> {};
+
+  template <typename T>
+  struct is_trivially_copyable :
+     std::integral_constant<bool, __has_trivial_copy(typename std::remove_reference<T>::type)> {};
+
+#else
+  template <typename T> using is_trivially_copy_constructible = std::is_trivially_copy_constructible<T>;
+  template <typename T> using is_trivially_copy_assignable = std::is_trivially_copy_assignable<T>;
+  template <typename T> using is_trivially_copyable = std::is_trivially_copyable<T>;
+#endif
+
 // -----------------------------------------------------------------------------
 // C++14 "_t" trait aliases
 // -----------------------------------------------------------------------------
@@ -333,7 +363,7 @@ namespace type_traits_internal {
             std::size_t>::value>> : std::true_type {};
 #endif
 
-struct AssertHashEnabledHelper 
+struct AssertHashEnabledHelper
 {
 private:
     static void Sink(...) {}
@@ -372,7 +402,7 @@ private:
 
 template <class... Ts>
 inline void AssertHashEnabled
-() 
+()
 {
     using Helper = AssertHashEnabledHelper;
     Helper::Sink(Helper::DoIt<Ts>()...);
@@ -391,10 +421,10 @@ namespace priv {
 
 // Defines how slots are initialized/destroyed/moved.
 template <class Policy, class = void>
-struct hash_policy_traits 
+struct hash_policy_traits
 {
 private:
-    struct ReturnKey 
+    struct ReturnKey
     {
         // We return `Key` here.
         // When Key=T&, we forward the lvalue reference.
@@ -622,83 +652,87 @@ namespace phmap {
 namespace base_internal {
 
 namespace {
-template <typename T>
+
 #ifdef PHMAP_HAVE_EXCEPTIONS
-[[noreturn]] void Throw(const T& error) {
-    throw error;
-}
+  #define PHMAP_THROW_IMPL_MSG(e, message) throw e(message)
+  #define PHMAP_THROW_IMPL(e) throw e()
 #else
-[[noreturn]] void Throw(const T&) {
-    std::abort();
-}
+  #define PHMAP_THROW_IMPL_MSG(e, message) do { (void)(message); std::abort(); } while(0)
+  #define PHMAP_THROW_IMPL(e) std::abort()
 #endif
 }  // namespace
 
 static inline void ThrowStdLogicError(const std::string& what_arg) {
-  Throw(std::logic_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::logic_error, what_arg);
 }
 static inline void ThrowStdLogicError(const char* what_arg) {
-  Throw(std::logic_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::logic_error, what_arg);
 }
 static inline void ThrowStdInvalidArgument(const std::string& what_arg) {
-  Throw(std::invalid_argument(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::invalid_argument, what_arg);
 }
 static inline void ThrowStdInvalidArgument(const char* what_arg) {
-  Throw(std::invalid_argument(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::invalid_argument, what_arg);
 }
 
 static inline void ThrowStdDomainError(const std::string& what_arg) {
-  Throw(std::domain_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::domain_error, what_arg);
 }
 static inline void ThrowStdDomainError(const char* what_arg) {
-  Throw(std::domain_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::domain_error, what_arg);
 }
 
 static inline void ThrowStdLengthError(const std::string& what_arg) {
-  Throw(std::length_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::length_error, what_arg);
 }
 static inline void ThrowStdLengthError(const char* what_arg) {
-  Throw(std::length_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::length_error, what_arg);
 }
 
 static inline void ThrowStdOutOfRange(const std::string& what_arg) {
-  Throw(std::out_of_range(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::out_of_range, what_arg);
 }
 static inline void ThrowStdOutOfRange(const char* what_arg) {
-  Throw(std::out_of_range(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::out_of_range, what_arg);
 }
 
 static inline void ThrowStdRuntimeError(const std::string& what_arg) {
-  Throw(std::runtime_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::runtime_error, what_arg);
 }
 static inline void ThrowStdRuntimeError(const char* what_arg) {
-  Throw(std::runtime_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::runtime_error, what_arg);
 }
 
 static inline void ThrowStdRangeError(const std::string& what_arg) {
-  Throw(std::range_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::range_error, what_arg);
 }
 static inline void ThrowStdRangeError(const char* what_arg) {
-  Throw(std::range_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::range_error, what_arg);
 }
 
 static inline void ThrowStdOverflowError(const std::string& what_arg) {
-  Throw(std::overflow_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::overflow_error, what_arg);
 }
+
 static inline void ThrowStdOverflowError(const char* what_arg) {
-  Throw(std::overflow_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::overflow_error, what_arg);
 }
 
 static inline void ThrowStdUnderflowError(const std::string& what_arg) {
-  Throw(std::underflow_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::underflow_error, what_arg);
 }
+
 static inline void ThrowStdUnderflowError(const char* what_arg) {
-  Throw(std::underflow_error(what_arg));
+  PHMAP_THROW_IMPL_MSG(std::underflow_error, what_arg);
 }
 
-static inline void ThrowStdBadFunctionCall() { Throw(std::bad_function_call()); }
+static inline void ThrowStdBadFunctionCall() {
+  PHMAP_THROW_IMPL(std::bad_function_call);
+}
 
-static inline void ThrowStdBadAlloc() { Throw(std::bad_alloc()); }
+static inline void ThrowStdBadAlloc() {
+  PHMAP_THROW_IMPL(std::bad_alloc);
+}
 
 }  // namespace base_internal
 }  // namespace phmap
@@ -709,7 +743,7 @@ namespace phmap {
 namespace base_internal {
 
 template <typename Derived>
-struct StrippedAccept 
+struct StrippedAccept
 {
     template <typename... Args>
     struct Accept : Derived::template AcceptImpl<typename std::remove_cv<
@@ -719,7 +753,7 @@ struct StrippedAccept
 // (t1.*f)(t2, ..., tN) when f is a pointer to a member function of a class T
 // and t1 is an object of type T or a reference to an object of type T or a
 // reference to an object of a type derived from T.
-struct MemFunAndRef : StrippedAccept<MemFunAndRef> 
+struct MemFunAndRef : StrippedAccept<MemFunAndRef>
 {
     template <typename... Args>
     struct AcceptImpl : std::false_type {};
@@ -745,7 +779,7 @@ struct MemFunAndRef : StrippedAccept<MemFunAndRef>
 
 // ((*t1).*f)(t2, ..., tN) when f is a pointer to a member function of a
 // class T and t1 is not one of the types described in the previous item.
-struct MemFunAndPtr : StrippedAccept<MemFunAndPtr> 
+struct MemFunAndPtr : StrippedAccept<MemFunAndPtr>
 {
     template <typename... Args>
     struct AcceptImpl : std::false_type {};
@@ -772,7 +806,7 @@ struct MemFunAndPtr : StrippedAccept<MemFunAndPtr>
 // t1.*f when N == 1 and f is a pointer to member data of a class T and t1 is
 // an object of type T or a reference to an object of type T or a reference
 // to an object of a type derived from T.
-struct DataMemAndRef : StrippedAccept<DataMemAndRef> 
+struct DataMemAndRef : StrippedAccept<DataMemAndRef>
 {
     template <typename... Args>
     struct AcceptImpl : std::false_type {};
@@ -789,7 +823,7 @@ struct DataMemAndRef : StrippedAccept<DataMemAndRef>
 
 // (*t1).*f when N == 1 and f is a pointer to member data of a class T and t1
 // is not one of the types described in the previous item.
-struct DataMemAndPtr : StrippedAccept<DataMemAndPtr> 
+struct DataMemAndPtr : StrippedAccept<DataMemAndPtr>
 {
     template <typename... Args>
     struct AcceptImpl : std::false_type {};
@@ -819,7 +853,7 @@ struct Callable
 
 // Resolves to the first matching clause.
 template <typename... Args>
-struct Invoker 
+struct Invoker
 {
     typedef typename std::conditional<
         MemFunAndRef::Accept<Args...>::value, MemFunAndRef,
@@ -872,7 +906,7 @@ namespace phmap {
 //     user_function(make_integer_sequence<int, 5>());
 //   }
 template <typename T, T... Ints>
-struct integer_sequence 
+struct integer_sequence
 {
     using value_type = T;
     static constexpr size_t size() noexcept { return sizeof...(Ints); }
@@ -1115,7 +1149,7 @@ T exchange(T& obj, U&& new_value)
 namespace phmap {
 
 template <typename T>
-std::unique_ptr<T> WrapUnique(T* ptr) 
+std::unique_ptr<T> WrapUnique(T* ptr)
 {
     static_assert(!std::is_array<T>::value, "array types are unsupported");
     static_assert(std::is_object<T>::value, "non-object types are unsupported");
@@ -1141,7 +1175,7 @@ struct MakeUniqueResult<T[N]> {
 }  // namespace memory_internal
 
 #if (__cplusplus > 201103L || defined(_MSC_VER)) && \
-    !(defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ == 8) 
+    !(defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ == 8)
     using std::make_unique;
 #else
 
@@ -1150,12 +1184,12 @@ struct MakeUniqueResult<T[N]> {
         Args&&... args) {
         return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
     }
-    
+
     template <typename T>
     typename memory_internal::MakeUniqueResult<T>::array make_unique(size_t n) {
         return std::unique_ptr<T>(new typename phmap::remove_extent_t<T>[n]());
     }
-    
+
     template <typename T, typename... Args>
     typename memory_internal::MakeUniqueResult<T>::invalid make_unique(
         Args&&... /* args */) = delete;
@@ -1291,7 +1325,7 @@ struct RebindAlloc<A, U, true> {
 }  // namespace memory_internal
 
 template <typename Ptr>
-struct pointer_traits 
+struct pointer_traits
 {
     using pointer = Ptr;
 
@@ -1321,7 +1355,7 @@ struct pointer_traits
 
 // Specialization for T*.
 template <typename T>
-struct pointer_traits<T*> 
+struct pointer_traits<T*>
 {
     using pointer = T*;
     using element_type = T;
@@ -1345,7 +1379,7 @@ struct pointer_traits<T*>
 // A C++11 compatible implementation of C++17's std::allocator_traits.
 //
 template <typename Alloc>
-struct allocator_traits 
+struct allocator_traits
 {
     using allocator_type = Alloc;
 
@@ -1579,7 +1613,7 @@ struct allocator_is_nothrow
 namespace memory_internal {
 template <typename Allocator, typename Iterator, typename... Args>
 void ConstructRange(Allocator& alloc, Iterator first, Iterator last,
-                    const Args&... args) 
+                    const Args&... args)
 {
     for (Iterator cur = first; cur != last; ++cur) {
         PHMAP_INTERNAL_TRY {
@@ -1598,7 +1632,7 @@ void ConstructRange(Allocator& alloc, Iterator first, Iterator last,
 
 template <typename Allocator, typename Iterator, typename InputIterator>
 void CopyRange(Allocator& alloc, Iterator destination, InputIterator first,
-               InputIterator last) 
+               InputIterator last)
 {
     for (Iterator cur = destination; first != last;
          static_cast<void>(++cur), static_cast<void>(++first)) {
@@ -1650,7 +1684,7 @@ using std::nullopt;
 
 namespace phmap {
 
-class bad_optional_access : public std::exception 
+class bad_optional_access : public std::exception
 {
 public:
     bad_optional_access() = default;
@@ -1662,7 +1696,7 @@ template <typename T>
 class optional;
 
 // --------------------------------
-struct nullopt_t 
+struct nullopt_t
 {
     struct init_t {};
     static init_t init;
@@ -1684,7 +1718,7 @@ struct empty_struct {};
 // It is specialized based on whether T is trivially destructible.
 // This is the specialization for non trivially destructible type.
 template <typename T, bool unused = std::is_trivially_destructible<T>::value>
-class optional_data_dtor_base 
+class optional_data_dtor_base
 {
     struct dummy_type {
         static_assert(sizeof(T) % sizeof(empty_struct) == 0, "");
@@ -1720,7 +1754,7 @@ protected:
 
 // Specialization for trivially destructible type.
 template <typename T>
-class optional_data_dtor_base<T, true> 
+class optional_data_dtor_base<T, true>
 {
     struct dummy_type {
         static_assert(sizeof(T) % sizeof(empty_struct) == 0, "");
@@ -1747,7 +1781,7 @@ protected:
 };
 
 template <typename T>
-class optional_data_base : public optional_data_dtor_base<T> 
+class optional_data_base : public optional_data_dtor_base<T>
 {
 protected:
     using base = optional_data_dtor_base<T>;
@@ -1786,14 +1820,14 @@ protected:
 // supported now, so we use is_trivially_* traits instead.
 template <typename T,
           bool unused =
-          std::is_trivially_copy_constructible<T>::value &&
-          std::is_trivially_copy_assignable<typename std::remove_cv<T>::type>::value &&
+          phmap::is_trivially_copy_constructible<T>::value &&
+          phmap::is_trivially_copy_assignable<typename std::remove_cv<T>::type>::value &&
           std::is_trivially_destructible<T>::value>
 class optional_data;
 
 // Trivially copyable types
 template <typename T>
-class optional_data<T, true> : public optional_data_base<T> 
+class optional_data<T, true> : public optional_data_base<T>
 {
 protected:
 #if PHMAP_OPTIONAL_USE_INHERITING_CONSTRUCTORS
@@ -1808,7 +1842,7 @@ protected:
 };
 
 template <typename T>
-class optional_data<T, false> : public optional_data_base<T> 
+class optional_data<T, false> : public optional_data_base<T>
 {
 protected:
 #if PHMAP_OPTIONAL_USE_INHERITING_CONSTRUCTORS
@@ -1866,7 +1900,7 @@ template <copy_traits>
 class optional_ctor_base;
 
 template <>
-class optional_ctor_base<copy_traits::copyable> 
+class optional_ctor_base<copy_traits::copyable>
 {
 public:
     constexpr optional_ctor_base() = default;
@@ -1877,7 +1911,7 @@ public:
 };
 
 template <>
-class optional_ctor_base<copy_traits::movable> 
+class optional_ctor_base<copy_traits::movable>
 {
 public:
     constexpr optional_ctor_base() = default;
@@ -1888,7 +1922,7 @@ public:
 };
 
 template <>
-class optional_ctor_base<copy_traits::non_movable> 
+class optional_ctor_base<copy_traits::non_movable>
 {
 public:
     constexpr optional_ctor_base() = default;
@@ -1903,7 +1937,7 @@ template <copy_traits>
 class optional_assign_base;
 
 template <>
-class optional_assign_base<copy_traits::copyable> 
+class optional_assign_base<copy_traits::copyable>
 {
 public:
     constexpr optional_assign_base() = default;
@@ -1914,7 +1948,7 @@ public:
 };
 
 template <>
-class optional_assign_base<copy_traits::movable> 
+class optional_assign_base<copy_traits::movable>
 {
 public:
     constexpr optional_assign_base() = default;
@@ -1925,7 +1959,7 @@ public:
 };
 
 template <>
-class optional_assign_base<copy_traits::non_movable> 
+class optional_assign_base<copy_traits::non_movable>
 {
 public:
     constexpr optional_assign_base() = default;
@@ -1936,7 +1970,7 @@ public:
 };
 
 template <typename T>
-constexpr copy_traits get_ctor_copy_traits() 
+constexpr copy_traits get_ctor_copy_traits()
 {
     return std::is_copy_constructible<T>::value
         ? copy_traits::copyable
@@ -1945,7 +1979,7 @@ constexpr copy_traits get_ctor_copy_traits()
 }
 
 template <typename T>
-constexpr copy_traits get_assign_copy_traits() 
+constexpr copy_traits get_assign_copy_traits()
 {
     return phmap::is_copy_assignable<T>::value &&
                  std::is_copy_constructible<T>::value
@@ -1988,7 +2022,7 @@ bool convertible_to_bool(bool);
 // compute the hash; Otherwise, it is disabled.
 // Reference N4659 23.14.15 [unord.hash].
 template <typename T, typename = size_t>
-struct optional_hash_base 
+struct optional_hash_base
 {
     optional_hash_base() = delete;
     optional_hash_base(const optional_hash_base&) = delete;
@@ -1999,7 +2033,7 @@ struct optional_hash_base
 
 template <typename T>
 struct optional_hash_base<T, decltype(std::hash<phmap::remove_const_t<T> >()(
-                                 std::declval<phmap::remove_const_t<T> >()))> 
+                                 std::declval<phmap::remove_const_t<T> >()))>
 {
     using argument_type = phmap::optional<T>;
     using result_type = size_t;
@@ -2019,13 +2053,18 @@ struct optional_hash_base<T, decltype(std::hash<phmap::remove_const_t<T> >()(
 // -----------------------------------------------------------------------------
 // phmap::optional class definition
 // -----------------------------------------------------------------------------
+#if PHMAP_OLD_GCC
+    #define PHMAP_OPTIONAL_NOEXCEPT
+#else
+    #define PHMAP_OPTIONAL_NOEXCEPT noexcept
+#endif
 
 template <typename T>
 class optional : private optional_internal::optional_data<T>,
                  private optional_internal::optional_ctor_base<
                      optional_internal::get_ctor_copy_traits<T>()>,
                  private optional_internal::optional_assign_base<
-                     optional_internal::get_assign_copy_traits<T>()> 
+                     optional_internal::get_assign_copy_traits<T>()>
 {
     using data_base = optional_internal::optional_data<T>;
 
@@ -2045,7 +2084,7 @@ public:
     optional(const optional& src) = default;
 
     // Move constructor, standard semantics
-    optional(optional&& src) = default;
+    optional(optional&& src) PHMAP_OPTIONAL_NOEXCEPT = default;
 
     // Constructs a non-empty `optional` direct-initialized value of type `T` from
     // the arguments `std::forward<Args>(args)...`  within the `optional`.
@@ -2185,7 +2224,7 @@ public:
     optional& operator=(const optional& src) = default;
 
     // Move assignment operator, standard semantics
-    optional& operator=(optional&& src) = default;
+    optional& operator=(optional&& src) PHMAP_OPTIONAL_NOEXCEPT = default;
 
     // Value assignment operators
     template <
@@ -2690,7 +2729,7 @@ struct IsTransparent<T, phmap::void_t<typename T::is_transparent>>
     : std::true_type {};
 
 template <bool is_transparent>
-struct KeyArg 
+struct KeyArg
 {
     // Transparent. Forward `K`.
     template <typename K, typename key_type>
@@ -2698,7 +2737,7 @@ struct KeyArg
 };
 
 template <>
-struct KeyArg<false> 
+struct KeyArg<false>
 {
     // Not transparent. Always use `key_type`.
     template <typename K, typename key_type>
@@ -2706,7 +2745,7 @@ struct KeyArg<false>
 };
 
 #ifdef _MSC_VER
-    #pragma warning(push)  
+    #pragma warning(push)
     //  warning C4820: '6' bytes padding added after data member
     #pragma warning(disable : 4820)
 #endif
@@ -2716,7 +2755,7 @@ struct KeyArg<false>
 // common API of both.
 // -----------------------------------------------------------------------
 template <typename PolicyTraits, typename Alloc>
-class node_handle_base 
+class node_handle_base
 {
 protected:
     using slot_type = typename PolicyTraits::slot_type;
@@ -2754,7 +2793,7 @@ protected:
         : alloc_(a) {
         PolicyTraits::transfer(alloc(), slot(), s);
     }
-    
+
     struct move_tag_t {};
     node_handle_base(move_tag_t, const allocator_type& a, slot_type* s)
         : alloc_(a) {
@@ -2793,14 +2832,14 @@ private:
 };
 
 #ifdef _MSC_VER
-     #pragma warning(pop)  
+     #pragma warning(pop)
 #endif
 
 // For sets.
 // ---------
 template <typename Policy, typename PolicyTraits, typename Alloc,
           typename = void>
-class node_handle : public node_handle_base<PolicyTraits, Alloc> 
+class node_handle : public node_handle_base<PolicyTraits, Alloc>
 {
     using Base = node_handle_base<PolicyTraits, Alloc>;
 
@@ -2824,7 +2863,7 @@ private:
 template <typename Policy, typename PolicyTraits, typename Alloc>
 class node_handle<Policy, PolicyTraits, Alloc,
                   phmap::void_t<typename Policy::mapped_type>>
-    : public node_handle_base<PolicyTraits, Alloc> 
+    : public node_handle_base<PolicyTraits, Alloc>
 {
     using Base = node_handle_base<PolicyTraits, Alloc>;
     using slot_type = typename PolicyTraits::slot_type;
@@ -2850,7 +2889,7 @@ private:
 };
 
 // Provide access to non-public node-handle functions.
-struct CommonAccess 
+struct CommonAccess
 {
     template <typename Node>
     static auto GetSlot(const Node& node) -> decltype(node.slot()) {
@@ -2885,7 +2924,7 @@ struct CommonAccess
 
 // Implement the insert_return_type<> concept of C++17.
 template <class Iterator, class NodeType>
-struct InsertReturnType 
+struct InsertReturnType
 {
     Iterator position;
     bool inserted;
@@ -3078,7 +3117,7 @@ using EnableIfConvertibleToSpanConst =
 //   int* my_array = new int[10];
 //   MyRoutine(phmap::Span<const int>(my_array, 10));
 template <typename T>
-class Span 
+class Span
 {
 private:
     // Used to determine whether a Span can be constructed from a container of
@@ -3786,7 +3825,7 @@ class LayoutImpl;
 // ---------------------------------------------------------------------------
 template <class... Elements, size_t... SizeSeq, size_t... OffsetSeq>
 class LayoutImpl<std::tuple<Elements...>, phmap::index_sequence<SizeSeq...>,
-                 phmap::index_sequence<OffsetSeq...>> 
+                 phmap::index_sequence<OffsetSeq...>>
 {
 private:
     static_assert(sizeof...(Elements) > 0, "At least one field is required");
@@ -4096,7 +4135,7 @@ using LayoutType = LayoutImpl<
 // by `Layout`.
 // ---------------------------------------------------------------------------
 template <class... Ts>
-class Layout : public internal_layout::LayoutType<sizeof...(Ts), Ts...> 
+class Layout : public internal_layout::LayoutType<sizeof...(Ts), Ts...>
 {
 public:
     static_assert(sizeof...(Ts) > 0, "At least one field is required");
@@ -4125,183 +4164,9 @@ public:
         : internal_layout::LayoutType<sizeof...(Ts), Ts...>(sizes...) {}
 };
 
-}  // namespace priv
-}  // namespace phmap
-
-// ---------------------------------------------------------------------------
-//  compressed_tuple.h
-// ---------------------------------------------------------------------------
 
 #ifdef _MSC_VER
-    // We need to mark these classes with this declspec to ensure that
-    // CompressedTuple happens.
-    #define PHMAP_INTERNAL_COMPRESSED_TUPLE_DECLSPEC __declspec(empty_bases)
-#else  // _MSC_VER
-    #define PHMAP_INTERNAL_COMPRESSED_TUPLE_DECLSPEC
-#endif  // _MSC_VER
-
-namespace phmap {
-namespace priv {
-
-template <typename... Ts>
-class CompressedTuple;
-
-namespace internal_compressed_tuple {
-
-template <typename D, size_t I>
-struct Elem;
-template <typename... B, size_t I>
-struct Elem<CompressedTuple<B...>, I>
-    : std::tuple_element<I, std::tuple<B...>> {};
-template <typename D, size_t I>
-using ElemT = typename Elem<D, I>::type;
-
-// ---------------------------------------------------------------------------
-// Use the __is_final intrinsic if available. Where it's not available, classes
-// declared with the 'final' specifier cannot be used as CompressedTuple
-// elements.
-// TODO(sbenza): Replace this with std::is_final in C++14.
-// ---------------------------------------------------------------------------
-template <typename T>
-constexpr bool IsFinal() {
-#if defined(__clang__) || defined(__GNUC__)
-    return __is_final(T);
-#else
-    return false;
-#endif
-}
-
-template <typename T>
-constexpr bool ShouldUseBase() {
-#ifdef __INTEL_COMPILER
-    // avoid crash in Intel compiler
-    // assertion failed at: "shared/cfe/edgcpfe/lower_init.c", line 7013
-    return false; 
-#else
-    return std::is_class<T>::value && std::is_empty<T>::value && !IsFinal<T>();
-#endif
-}
-
-// The storage class provides two specializations:
-//  - For empty classes, it stores T as a base class.
-//  - For everything else, it stores T as a member.
-// ------------------------------------------------
-template <typename D, size_t I, bool = ShouldUseBase<ElemT<D, I>>()>
-struct Storage 
-{
-    using T = ElemT<D, I>;
-    T value;
-    constexpr Storage() = default;
-    explicit constexpr Storage(T&& v) : value(phmap::forward<T>(v)) {}
-    constexpr const T& get() const& { return value; }
-    T& get() & { return value; }
-    constexpr const T&& get() const&& { return phmap::move(*this).value; }
-    T&& get() && { return std::move(*this).value; }
-};
-
-template <typename D, size_t I>
-struct PHMAP_INTERNAL_COMPRESSED_TUPLE_DECLSPEC Storage<D, I, true>
-    : ElemT<D, I> 
-{
-    using T = internal_compressed_tuple::ElemT<D, I>;
-    constexpr Storage() = default;
-    explicit constexpr Storage(T&& v) : T(phmap::forward<T>(v)) {}
-    constexpr const T& get() const& { return *this; }
-    T& get() & { return *this; }
-    constexpr const T&& get() const&& { return phmap::move(*this); }
-    T&& get() && { return std::move(*this); }
-};
-
-template <typename D, typename I>
-struct PHMAP_INTERNAL_COMPRESSED_TUPLE_DECLSPEC CompressedTupleImpl;
-
-template <typename... Ts, size_t... I>
-struct PHMAP_INTERNAL_COMPRESSED_TUPLE_DECLSPEC
-    CompressedTupleImpl<CompressedTuple<Ts...>, phmap::index_sequence<I...>>
-    // We use the dummy identity function through std::integral_constant to
-    // convince MSVC of accepting and expanding I in that context. Without it
-    // you would get:
-    //   error C3548: 'I': parameter pack cannot be used in this context
-    : Storage<CompressedTuple<Ts...>,
-              std::integral_constant<size_t, I>::value>... 
-{
-    constexpr CompressedTupleImpl() = default;
-    explicit constexpr CompressedTupleImpl(Ts&&... args)
-        : Storage<CompressedTuple<Ts...>, I>(phmap::forward<Ts>(args))... {}
-};
-
-}  // namespace internal_compressed_tuple
-
-// ---------------------------------------------------------------------------
-// Helper class to perform the Empty Base Class Optimization.
-// Ts can contain classes and non-classes, empty or not. For the ones that
-// are empty classes, we perform the CompressedTuple. If all types in Ts are
-// empty classes, then CompressedTuple<Ts...> is itself an empty class.
-//
-// To access the members, use member .get<N>() function.
-//
-// Eg:
-//   phmap::priv::CompressedTuple<int, T1, T2, T3> value(7, t1, t2,
-//                                                                    t3);
-//   assert(value.get<0>() == 7);
-//   T1& t1 = value.get<1>();
-//   const T2& t2 = value.get<2>();
-//   ...
-//
-// https://en.cppreference.com/w/cpp/language/ebo
-// ---------------------------------------------------------------------------
-template <typename... Ts>
-class PHMAP_INTERNAL_COMPRESSED_TUPLE_DECLSPEC CompressedTuple
-    : private internal_compressed_tuple::CompressedTupleImpl<
-          CompressedTuple<Ts...>, phmap::index_sequence_for<Ts...>> 
-{
-private:
-    template <int I>
-        using ElemT = internal_compressed_tuple::ElemT<CompressedTuple, I>;
-
-public:
-    constexpr CompressedTuple() = default;
-    explicit constexpr CompressedTuple(Ts... base)
-        : CompressedTuple::CompressedTupleImpl(phmap::forward<Ts>(base)...) {}
-
-    template <int I>
-        ElemT<I>& get() & {
-        return internal_compressed_tuple::Storage<CompressedTuple, I>::get();
-    }
-
-    template <int I>
-        constexpr const ElemT<I>& get() const& {
-        return internal_compressed_tuple::Storage<CompressedTuple, I>::get();
-    }
-
-    template <int I>
-        ElemT<I>&& get() && {
-        return std::move(*this)
-            .internal_compressed_tuple::template Storage<CompressedTuple, I>::get();
-    }
-
-    template <int I>
-        constexpr const ElemT<I>&& get() const&& {
-        return phmap::move(*this)
-            .internal_compressed_tuple::template Storage<CompressedTuple, I>::get();
-    }
-};
-
-// Explicit specialization for a zero-element tuple
-// (needed to avoid ambiguous overloads for the default constructor).
-// ---------------------------------------------------------------------------
-template <>
-class PHMAP_INTERNAL_COMPRESSED_TUPLE_DECLSPEC CompressedTuple<> {};
-
-}  // namespace priv
-}  // namespace phmap
-
-
-namespace phmap {
-namespace priv {
-
-#ifdef _MSC_VER
-    #pragma warning(push)  
+    #pragma warning(push)
     // warning warning C4324: structure was padded due to alignment specifier
     #pragma warning(disable : 4324)
 #endif
@@ -4347,7 +4212,7 @@ void Deallocate(Alloc* alloc, void* p, size_t n) {
 }
 
 #ifdef _MSC_VER
-     #pragma warning(pop)  
+     #pragma warning(pop)
 #endif
 
 // Helper functions for asan and msan.
@@ -4512,20 +4377,20 @@ namespace memory_internal {
 // ----------------------------------------------------------------------------
 template <class Pair, class = std::true_type>
 struct OffsetOf {
-    static constexpr size_t kFirst = (size_t)-1;
-  static constexpr size_t kSecond = (size_t)-1;
+   static constexpr size_t kFirst  = static_cast<size_t>(-1);
+   static constexpr size_t kSecond = static_cast<size_t>(-1);
 };
 
 template <class Pair>
-struct OffsetOf<Pair, typename std::is_standard_layout<Pair>::type> 
+struct OffsetOf<Pair, typename std::is_standard_layout<Pair>::type>
 {
-    static constexpr size_t kFirst = offsetof(Pair, first);
+    static constexpr size_t kFirst  = offsetof(Pair, first);
     static constexpr size_t kSecond = offsetof(Pair, second);
 };
 
 // ----------------------------------------------------------------------------
 template <class K, class V>
-struct IsLayoutCompatible 
+struct IsLayoutCompatible
 {
 private:
     struct Pair {
@@ -4583,7 +4448,7 @@ public:
 // https://timsong-cpp.github.io/cppwp/n3337/class.mem#19 (9.2.19)
 // ----------------------------------------------------------------------------
 template <class K, class V>
-union map_slot_type 
+union map_slot_type
 {
     map_slot_type() {}
     ~map_slot_type() = delete;
@@ -4601,7 +4466,7 @@ union map_slot_type
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 template <class K, class V>
-struct map_slot_policy 
+struct map_slot_policy
 {
     using slot_type = map_slot_type<K, V>;
     using value_type = std::pair<const K, V>;
@@ -4730,8 +4595,8 @@ namespace phmap {
 // -----------------------------------------------------------------------------
 // NullMutex
 // -----------------------------------------------------------------------------
-// A class that implements the Mutex interface, but does nothing. This is to be 
-// used as a default template parameters for classes who provide optional 
+// A class that implements the Mutex interface, but does nothing. This is to be
+// used as a default template parameters for classes who provide optional
 // internal locking (like phmap::parallel_flat_hash_map).
 // -----------------------------------------------------------------------------
 class NullMutex {
@@ -4748,13 +4613,13 @@ public:
 
 // ------------------------ lockable object used internally -------------------------
 template <class MutexType>
-class LockableBaseImpl 
+class LockableBaseImpl
 {
 public:
     // ----------------------------------------------------
     struct DoNothing
     {
-        using mutex_type = MutexType;  
+        using mutex_type = MutexType;
         DoNothing() noexcept {}
         explicit DoNothing(mutex_type& ) noexcept {}
         explicit DoNothing(mutex_type& , mutex_type&) noexcept {}
@@ -4763,9 +4628,14 @@ public:
         DoNothing(mutex_type&, phmap::try_to_lock_t) {}
         template<class T> explicit DoNothing(T&&) {}
         DoNothing& operator=(const DoNothing&) { return *this; }
-        DoNothing& operator=(DoNothing&&) { return *this; }
-        void swap(DoNothing &) {}
+        DoNothing& operator=(DoNothing&&) noexcept { return *this; }
+        void swap(DoNothing &)  noexcept {}
         bool owns_lock() const noexcept { return true; }
+        void lock() {}
+        void unlock() {}
+        void lock_shared() {}
+        void unlock_shared() {}
+        bool switch_to_unique() { return false; }
     };
 
     // ----------------------------------------------------
@@ -4776,70 +4646,72 @@ public:
 
         WriteLock() :  m_(nullptr), locked_(false)  {}
 
-        explicit WriteLock(mutex_type &m) : m_(&m) { 
-            m_->lock(); 
-            locked_ = true; 
+        explicit WriteLock(mutex_type &m) : m_(&m) {
+            m_->lock();
+            locked_ = true;
         }
 
         WriteLock(mutex_type& m, adopt_lock_t) noexcept :
-            m_(&m), locked_(true) 
+            m_(&m), locked_(true)
         {}
 
         WriteLock(mutex_type& m, defer_lock_t) noexcept :
-            m_(&m), locked_(false) 
+            m_(&m), locked_(false)
         {}
 
         WriteLock(mutex_type& m, try_to_lock_t)  :
-            m_(&m), locked_(false) { 
-            m_->try_lock(); 
+            m_(&m), locked_(false) {
+            m_->try_lock();
         }
 
-        WriteLock(WriteLock &&o) :
+        WriteLock(WriteLock &&o) noexcept :
             m_(std::move(o.m_)), locked_(std::move(o.locked_)) {
             o.locked_ = false;
             o.m_      = nullptr;
         }
 
-        WriteLock& operator=(WriteLock&& other) {
+        WriteLock& operator=(WriteLock&& other) noexcept {
             WriteLock temp(std::move(other));
             swap(temp);
             return *this;
         }
 
         ~WriteLock() {
-            if (locked_) 
-                m_->unlock(); 
+            if (locked_)
+                m_->unlock();
         }
 
-        void lock() { 
-            if (!locked_) { 
-                m_->lock(); 
-                locked_ = true; 
+        void lock() {
+            if (!locked_) {
+                m_->lock();
+                locked_ = true;
             }
         }
 
-        void unlock() { 
+        void unlock() {
             if (locked_) {
-                m_->unlock(); 
+                m_->unlock();
                 locked_ = false;
             }
-        } 
+        }
 
-        bool try_lock() { 
+        bool try_lock() {
             if (locked_)
                 return true;
-            locked_ = m_->try_lock(); 
+            locked_ = m_->try_lock();
             return locked_;
         }
-        
+
         bool owns_lock() const noexcept { return locked_; }
 
-        void swap(WriteLock &o) noexcept { 
+        void swap(WriteLock &o) noexcept {
             std::swap(m_, o.m_);
             std::swap(locked_, o.locked_);
         }
 
         mutex_type *mutex() const noexcept { return m_; }
+
+        bool switch_to_unique() { return false; }
 
     private:
         mutex_type *m_;
@@ -4854,70 +4726,72 @@ public:
 
         ReadLock() :  m_(nullptr), locked_(false)  {}
 
-        explicit ReadLock(mutex_type &m) : m_(&m) { 
-            m_->lock_shared(); 
-            locked_ = true; 
+        explicit ReadLock(mutex_type &m) : m_(&m) {
+            m_->lock_shared();
+            locked_ = true;
         }
 
         ReadLock(mutex_type& m, adopt_lock_t) noexcept :
-            m_(&m), locked_(true) 
+            m_(&m), locked_(true)
         {}
 
         ReadLock(mutex_type& m, defer_lock_t) noexcept :
-            m_(&m), locked_(false) 
+            m_(&m), locked_(false)
         {}
 
         ReadLock(mutex_type& m, try_to_lock_t)  :
-            m_(&m), locked_(false) { 
-            m_->try_lock_shared(); 
+            m_(&m), locked_(false) {
+            m_->try_lock_shared();
         }
 
-        ReadLock(ReadLock &&o) :
+        ReadLock(ReadLock &&o) noexcept :
             m_(std::move(o.m_)), locked_(std::move(o.locked_)) {
             o.locked_ = false;
             o.m_      = nullptr;
         }
 
-        ReadLock& operator=(ReadLock&& other) {
+        ReadLock& operator=(ReadLock&& other) noexcept {
             ReadLock temp(std::move(other));
             swap(temp);
             return *this;
         }
 
         ~ReadLock() {
-            if (locked_) 
-                m_->unlock_shared(); 
+            if (locked_)
+                m_->unlock_shared();
         }
 
-        void lock() { 
-            if (!locked_) { 
-                m_->lock_shared(); 
-                locked_ = true; 
+        void lock() {
+            if (!locked_) {
+                m_->lock_shared();
+                locked_ = true;
             }
         }
 
-        void unlock() { 
+        void unlock() {
             if (locked_) {
-                m_->unlock_shared(); 
+                m_->unlock_shared();
                 locked_ = false;
             }
-        } 
+        }
 
-        bool try_lock() { 
+        bool try_lock() {
             if (locked_)
                 return true;
-            locked_ = m_->try_lock_shared(); 
+            locked_ = m_->try_lock_shared();
             return locked_;
         }
-        
+
         bool owns_lock() const noexcept { return locked_; }
 
-        void swap(ReadLock &o) noexcept { 
+        void swap(ReadLock &o) noexcept {
             std::swap(m_, o.m_);
             std::swap(locked_, o.locked_);
         }
 
         mutex_type *mutex() const noexcept { return m_; }
+
+        bool switch_to_unique() { return false; }
 
     private:
         mutex_type *m_;
@@ -4925,15 +4799,105 @@ public:
     };
 
     // ----------------------------------------------------
+    class ReadWriteLock
+    {
+    public:
+        using mutex_type = MutexType;
+
+        ReadWriteLock() :  m_(nullptr), locked_(false), locked_shared_(false)  {}
+
+        explicit ReadWriteLock(mutex_type &m) : m_(&m), locked_(false), locked_shared_(true)  {
+            m_->lock_shared();
+        }
+
+        ReadWriteLock(mutex_type& m, defer_lock_t) noexcept :
+            m_(&m), locked_(false), locked_shared_(false)
+        {}
+
+        ReadWriteLock(ReadWriteLock &&o) noexcept :
+            m_(std::move(o.m_)), locked_(o.locked_), locked_shared_(o.locked_shared_) {
+            o.locked_        = false;
+            o.locked_shared_ = false;
+            o.m_             = nullptr;
+        }
+
+        ReadWriteLock& operator=(ReadWriteLock&& other) noexcept {
+            ReadWriteLock temp(std::move(other));
+            swap(temp);
+            return *this;
+        }
+
+        ~ReadWriteLock() {
+            if (locked_shared_)
+                m_->unlock_shared();
+            else if (locked_)
+                m_->unlock();
+        }
+
+        void lock_shared() {
+            assert(!locked_);
+            if (!locked_shared_) {
+                m_->lock_shared();
+                locked_shared_ = true;
+            }
+        }
+
+        void unlock_shared() {
+            if (locked_shared_) {
+                m_->unlock_shared();
+                locked_shared_ = false;
+            }
+        }
+
+        void lock() {
+            assert(!locked_shared_);
+            if (!locked_) {
+                m_->lock();
+                locked_ = true;
+            }
+        }
+
+        void unlock() {
+            if (locked_) {
+                m_->unlock();
+                locked_ = false;
+            }
+        }
+
+        bool owns_lock() const noexcept { return locked_; }
+        bool owns_shared_lock() const noexcept { return locked_shared_; }
+
+        void swap(ReadWriteLock &o) noexcept {
+            std::swap(m_, o.m_);
+            std::swap(locked_, o.locked_);
+            std::swap(locked_shared_, o.locked_shared_);
+        }
+
+        mutex_type *mutex() const noexcept { return m_; }
+
+        bool switch_to_unique() {
+            assert(locked_shared_);
+            unlock_shared();
+            lock();
+            return true;
+        }
+
+    private:
+        mutex_type *m_;
+        bool        locked_;
+        bool        locked_shared_;
+    };
+
+    // ----------------------------------------------------
     class WriteLocks
     {
     public:
-        using mutex_type = MutexType;  
+        using mutex_type = MutexType;
 
-        explicit WriteLocks(mutex_type& m1, mutex_type& m2) : 
+        explicit WriteLocks(mutex_type& m1, mutex_type& m2) :
             _m1(m1), _m2(m2)
-        { 
-            std::lock(m1, m2); 
+        {
+            std::lock(m1, m2);
         }
 
         WriteLocks(adopt_lock_t, mutex_type& m1, mutex_type& m2) :
@@ -4958,13 +4922,13 @@ public:
     class ReadLocks
     {
     public:
-        using mutex_type = MutexType;  
+        using mutex_type = MutexType;
 
-        explicit ReadLocks(mutex_type& m1, mutex_type& m2) : 
+        explicit ReadLocks(mutex_type& m1, mutex_type& m2) :
             _m1(m1), _m2(m2)
-        { 
-            _m1.lock_shared(); 
-            _m2.lock_shared(); 
+        {
+            _m1.lock_shared();
+            _m2.lock_shared();
         }
 
         ReadLocks(adopt_lock_t, mutex_type& m1, mutex_type& m2) :
@@ -4987,18 +4951,17 @@ public:
 };
 
 // ------------------------ holds a mutex ------------------------------------
-// Default implementation for Lockable, should work fine for std::mutex 
+// Default implementation for Lockable, should work fine for std::mutex
 // -----------------------------------
 // use as:
 //    using Lockable = phmap::LockableImpl<mutex_type>;
 //    Lockable m;
-//  
-//    Lockable::UpgradeLock read_lock(m); // take a upgradable lock
 //
-//    {
-//        Lockable::UpgradeToUnique unique_lock(read_lock);
-//        // now locked for write
-//    }
+//    Lockable::ReadWriteLock read_lock(m); // take a lock (read if supported, otherwise write)
+//    ... do something
+//
+//    m.switch_to_unique(); // returns true if we had a read lock and switched to write
+//    // now locked for write
 //
 // ---------------------------------------------------------------------------
 //         Generic mutex support (always write locks)
@@ -5010,11 +4973,10 @@ public:
     using mutex_type      = Mtx_;
     using Base            = LockableBaseImpl<Mtx_>;
     using SharedLock      = typename Base::WriteLock;
-    using UpgradeLock     = typename Base::WriteLock;
     using UniqueLock      = typename Base::WriteLock;
+    using ReadWriteLock   = typename Base::WriteLock;
     using SharedLocks     = typename Base::WriteLocks;
     using UniqueLocks     = typename Base::WriteLocks;
-    using UpgradeToUnique = typename Base::DoNothing;        // we already have unique ownership
 };
 
 // ---------------------------------------------------------------------------
@@ -5026,29 +4988,29 @@ class  LockableImpl<phmap::NullMutex>: public phmap::NullMutex
 public:
     using mutex_type      = phmap::NullMutex;
     using Base            = LockableBaseImpl<phmap::NullMutex>;
-    using SharedLock      = typename Base::DoNothing; 
-    using UpgradeLock     = typename Base::DoNothing; 
-    using UniqueLock      = typename Base::DoNothing; 
-    using UpgradeToUnique = typename Base::DoNothing; 
+    using SharedLock      = typename Base::DoNothing;
+    using ReadWriteLock   = typename Base::DoNothing;
+    using UniqueLock      = typename Base::DoNothing;
     using SharedLocks     = typename Base::DoNothing;
     using UniqueLocks     = typename Base::DoNothing;
 };
 
 // --------------------------------------------------------------------------
 //         Abseil Mutex support (read and write lock support)
+//         use: `phmap::AbslMutex` instead of `std::mutex`
 // --------------------------------------------------------------------------
 #ifdef ABSL_SYNCHRONIZATION_MUTEX_H_
-    
+
     struct AbslMutex : protected absl::Mutex
     {
-        void lock()            { this->Lock(); }
-        void unlock()          { this->Unlock(); }
-        void try_lock()        { this->TryLock(); }
-        void lock_shared()     { this->ReaderLock(); }
-        void unlock_shared()   { this->ReaderUnlock(); }
-        void try_lock_shared() { this->ReaderTryLock(); }
+        void lock()            ABSL_EXCLUSIVE_LOCK_FUNCTION()        { this->Lock(); }
+        void unlock()          ABSL_UNLOCK_FUNCTION()                { this->Unlock(); }
+        void try_lock()        ABSL_EXCLUSIVE_TRYLOCK_FUNCTION(true) { this->TryLock(); }
+        void lock_shared()     ABSL_SHARED_LOCK_FUNCTION()           { this->ReaderLock(); }
+        void unlock_shared()   ABSL_UNLOCK_FUNCTION()                { this->ReaderUnlock(); }
+        void try_lock_shared() ABSL_SHARED_TRYLOCK_FUNCTION(true)    { this->ReaderTryLock(); }
     };
-    
+
     template <>
     class  LockableImpl<absl::Mutex> : public AbslMutex
     {
@@ -5056,11 +5018,44 @@ public:
         using mutex_type      = phmap::AbslMutex;
         using Base            = LockableBaseImpl<phmap::AbslMutex>;
         using SharedLock      = typename Base::ReadLock;
-        using UpgradeLock     = typename Base::WriteLock;
+        using ReadWriteLock   = typename Base::ReadWriteLock;
         using UniqueLock      = typename Base::WriteLock;
         using SharedLocks     = typename Base::ReadLocks;
         using UniqueLocks     = typename Base::WriteLocks;
-        using UpgradeToUnique = typename Base::DoNothing; // we already have unique ownership
+    };
+
+#endif
+
+// --------------------------------------------------------------------------
+//         Microsoft SRWLOCK support (read and write lock support)
+//         use: `phmap::srwlock` instead of `std::mutex`
+// --------------------------------------------------------------------------
+#if defined(_MSC_VER) && defined(SRWLOCK_INIT)
+
+    class srwlock {
+        SRWLOCK _lock;
+    public:
+        srwlock()              { InitializeSRWLock(&_lock); }
+        void lock()            { AcquireSRWLockExclusive(&_lock); }
+        void unlock()          { ReleaseSRWLockExclusive(&_lock); }
+        bool try_lock()        { return !!TryAcquireSRWLockExclusive(&_lock); }
+        void lock_shared()     { AcquireSRWLockShared(&_lock); }
+        void unlock_shared()   { ReleaseSRWLockShared(&_lock); }
+        bool try_lock_shared() { return !!TryAcquireSRWLockShared(&_lock); }
+    };
+
+
+    template<>
+    class LockableImpl<srwlock> : public srwlock
+    {
+    public:
+        using mutex_type    = srwlock;
+        using Base          = LockableBaseImpl<srwlock>;
+        using SharedLock    = typename Base::ReadLock;
+        using ReadWriteLock = typename Base::ReadWriteLock;
+        using UniqueLock    = typename Base::WriteLock;
+        using SharedLocks   = typename Base::ReadLocks;
+        using UniqueLocks   = typename Base::WriteLocks;
     };
 
 #endif
@@ -5070,7 +5065,6 @@ public:
 // --------------------------------------------------------------------------
 #ifdef BOOST_THREAD_SHARED_MUTEX_HPP
 
-#if 1
     // ---------------------------------------------------------------------------
     template <>
     class  LockableImpl<boost::shared_mutex> : public boost::shared_mutex
@@ -5079,27 +5073,11 @@ public:
         using mutex_type      = boost::shared_mutex;
         using Base            = LockableBaseImpl<boost::shared_mutex>;
         using SharedLock      = boost::shared_lock<mutex_type>;
-        using UpgradeLock     = boost::unique_lock<mutex_type>; // assume can't upgrade
+        using ReadWriteLock   = typename Base::ReadWriteLock;
         using UniqueLock      = boost::unique_lock<mutex_type>;
         using SharedLocks     = typename Base::ReadLocks;
         using UniqueLocks     = typename Base::WriteLocks;
-        using UpgradeToUnique = typename Base::DoNothing;  // we already have unique ownership
     };
-#else
-    // ---------------------------------------------------------------------------
-    template <>
-    class  LockableImpl<boost::upgrade_mutex> : public boost::upgrade_mutex
-    {
-    public:
-        using mutex_type      = boost::upgrade_mutex;
-        using SharedLock      = boost::shared_lock<mutex_type>;
-        using UpgradeLock     = boost::upgrade_lock<mutex_type>;
-        using UniqueLock      = boost::unique_lock<mutex_type>;
-        using SharedLocks     = typename Base::ReadLocks;
-        using UniqueLocks     = typename Base::WriteLocks;
-        using UpgradeToUnique = boost::upgrade_to_unique_lock<mutex_type>;
-    };
-#endif
 
 #endif // BOOST_THREAD_SHARED_MUTEX_HPP
 
@@ -5116,11 +5094,10 @@ public:
         using mutex_type      = std::shared_mutex;
         using Base            = LockableBaseImpl<std::shared_mutex>;
         using SharedLock      = std::shared_lock<mutex_type>;
-        using UpgradeLock     = std::unique_lock<mutex_type>; // assume can't upgrade
+        using ReadWriteLock   = typename Base::ReadWriteLock;
         using UniqueLock      = std::unique_lock<mutex_type>;
         using SharedLocks     = typename Base::ReadLocks;
         using UniqueLocks     = typename Base::WriteLocks;
-        using UpgradeToUnique = typename Base::DoNothing;  // we already have unique ownership
     };
 #endif // PHMAP_HAVE_SHARED_MUTEX
 
@@ -5128,7 +5105,7 @@ public:
 }  // phmap
 
 #ifdef _MSC_VER
-     #pragma warning(pop)  
+     #pragma warning(pop)
 #endif
 
 
